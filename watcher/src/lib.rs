@@ -71,18 +71,18 @@ where
             withdrawals_meterer,
         } = self;
 
-        // While reading the stream of withdrawal events asyncronously
-        // we may never be sure that we are currenly looking at the last
+        // While reading the stream of withdrawal events asynchronously
+        // we may never be sure that we are currently looking at the last
         // event from the given block.
         //
-        // The following code asyncronously reads and accumulates events
+        // The following code asynchronously reads and accumulates events
         // that happened within the single block (the exact number is tracked in
         // `curr_block_number`) until it sees an event with a higher block number.
         // Then the following vector is drained and all events within it are written
         // into storage.
         //
-        // TODO: investigate instead subscribing to whole blocks via `subcscribe_blocks()`
-        // method and pasring and sending all events at once so that this function WE type
+        // TODO: investigate instead subscribing to whole blocks via `subscribe_blocks()`
+        // method and parsing and sending all events at once so that this function WE type
         // would change to `Stream<Vec<WithdrawalEvent>>` to handle a vector of all withdrawal
         // events that have happened within a single block.
 

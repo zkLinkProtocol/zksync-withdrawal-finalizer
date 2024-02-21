@@ -472,7 +472,7 @@ where
 
         // if the withdrawal has already been finalized set its
         // finalization transaction to zero which is signals exactly this
-        // it is known that withdrawal has been fianlized but not known
+        // it is known that withdrawal has been finalized but not known
         // in which exact transaction.
         //
         // this may happen in two cases:
@@ -554,10 +554,10 @@ where
 {
     let mut ok_results = Vec::with_capacity(hash_and_indices.len());
 
-    // Run all parametere fetching in parallel.
+    // Run all parameter fetching in parallel.
     // Filter out errors and log them and increment a metric counter.
     // Return successful fetches.
-    for (i, result) in futures::future::join_all(hash_and_indices.iter().map(|(h, i, id)| {
+    let res = futures::future::join_all(hash_and_indices.iter().map(|(h, i, id)| {
         middleware
             .finalize_withdrawal_params(*h, *i as usize)
             .map_ok(|r| {
@@ -567,10 +567,8 @@ where
             })
             .map_err(crate::Error::from)
     }))
-    .await
-    .into_iter()
-    .enumerate()
-    {
+        .await;
+    for (i, result) in res.into_iter().enumerate() {
         match result {
             Ok(r) => ok_results.push(r),
             Err(e) => {
@@ -644,7 +642,7 @@ where
         .into_iter()
         .collect();
 
-    storage::add_withdrawals_data(pool, &params).await?;
+    storage::add_finalization_data(pool, &params).await?;
     storage::finalization_data_set_finalized_in_tx(pool, &already_finalized, H256::zero()).await?;
 
     Ok(())

@@ -567,7 +567,7 @@ pub struct WithdrawalWithBlock {
 }
 
 /// Adds withdrawal information to the `finalization_data` table.
-pub async fn add_withdrawals_data(pool: &PgPool, wd: &[WithdrawalParams]) -> Result<()> {
+pub async fn add_finalization_data(pool: &PgPool, wd: &[WithdrawalParams]) -> Result<()> {
     let mut ids = Vec::with_capacity(wd.len());
     let mut l2_block_number = Vec::with_capacity(wd.len());
     let mut l1_batch_number = Vec::with_capacity(wd.len());
