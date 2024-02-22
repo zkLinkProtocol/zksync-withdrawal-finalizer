@@ -2,9 +2,9 @@
 
 pragma solidity ^0.8.0;
 
-import "@matterlabs/zksync-contracts/l1/contracts/bridge/interfaces/IL1Bridge.sol";
-import "@matterlabs/zksync-contracts/l1/contracts/zksync/interfaces/IMailbox.sol";
-import "@matterlabs/zksync-contracts/l1/contracts/common/libraries/UncheckedMath.sol";
+import "./IL1Bridge.sol";
+import "./IMailbox.sol";
+import "./UncheckedMath.sol";
 
 
 contract WithdrawalFinalizer {

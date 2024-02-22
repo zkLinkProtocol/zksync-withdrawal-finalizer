@@ -81,11 +81,12 @@ You may specify `All`, `None`, `BlackList` or `WhiteList` as json documents:
 The finalizer smart contract needs to reference the addresses of the diamond proxy contract and l1 erc20 proxy contract.
 You also need to know the key of the account you want to use to deploy the finalizer contract.
 
-When you know those to deploy the contract you need to run (assume you are running `anvil` in a separate terminal):
+When you know those to deploy the contract you need to run (assume you are create `.env` from `.env.example`):
 
 ```
-$ yarn
-$ env CONTRACTS_DIAMOND_PROXY_ADDR="0x9A6DE0f62Aa270A8bCB1e2610078650D539B1Ef9" CONTRACTS_L1_ERC20_BRIDGE_PROXY_ADDR="0x2Ae09702F77a4940621572fBcDAe2382D44a2cbA" MNEMONIC="test test test test test test test test test test test junk" ETH_CLIENT_WEB3_URL="http://localhost:8545" npx hardhat run ./scripts/deploy.ts
+$ npm install
+$ npx hardhat compile
+$ npx hardhat deploy --network lineatest
 ```
 
 If all goes well the the result would be

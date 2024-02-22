@@ -5,3 +5,4 @@ artifacts
 typechain-types
 *.log
 dev.env
+.env
