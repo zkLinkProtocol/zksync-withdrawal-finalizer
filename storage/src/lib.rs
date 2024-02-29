@@ -747,6 +747,8 @@ pub async fn withdrawals_to_finalize_with_blacklist(
     limit_by: u64,
     token_blacklist: &[Address],
     eth_threshold: Option<U256>,
+    is_exist: bool,
+    addresses: &[Vec<u8>],
 ) -> Result<Vec<WithdrawalParams>> {
     let blacklist: Vec<_> = token_blacklist.iter().map(|a| a.0.to_vec()).collect();
     // if no threshold, query _all_ ethereum withdrawals since all of them are >= 0.
@@ -764,13 +766,22 @@ pub async fn withdrawals_to_finalize_with_blacklist(
           l2_tx_number_in_block,
           message,
           sender,
-          proof
+          proof,
+          l2_to_l1_events.to_address
         FROM
           finalization_data
           JOIN withdrawals w ON finalization_data.withdrawal_id = w.id
+          JOIN l2_to_l1_events ON
+             finalization_data.l1_batch_number = l2_to_l1_events.l2_block_number
+          AND finalization_data.l2_tx_number_in_block = l2_to_l1_events.tx_number_in_block
         WHERE
           finalization_tx IS NULL
           AND failed_finalization_attempts < 3
+          AND (
+              ($4 AND l2_to_l1_events.to_address = ANY($5))
+                OR
+              (NOT $4 AND NOT l2_to_l1_events.to_address = ANY($5))
+          )
           AND finalization_data.l2_block_number <= COALESCE(
             (
               SELECT
@@ -786,7 +797,7 @@ pub async fn withdrawals_to_finalize_with_blacklist(
             $2 :: BYTEA []
           ))
           AND (
-            CASE WHEN token = decode('000000000000000000000000000000000000800A', 'hex') THEN amount >= $3
+            CASE WHEN token = decode('000000000000000000000000000000000000800A', 'hex') THEN w.amount >= $3
             ELSE TRUE
             END
           )
@@ -796,6 +807,8 @@ pub async fn withdrawals_to_finalize_with_blacklist(
         limit_by as i64,
         &blacklist,
         u256_to_big_decimal(eth_threshold),
+        is_exist,
+        addresses
     )
     .fetch_all(pool)
     .await?
@@ -812,6 +825,7 @@ pub async fn withdrawals_to_finalize_with_blacklist(
         sender: Address::from_slice(&record.sender),
         proof: bincode::deserialize(&record.proof)
             .expect("storage contains data correctly serialized by bincode; qed"),
+        to_address: Address::from_slice(&record.to_address),
     })
     .collect();
 
@@ -824,6 +838,8 @@ pub async fn withdrawals_to_finalize_with_whitelist(
     limit_by: u64,
     token_whitelist: &[Address],
     eth_threshold: Option<U256>,
+    is_exist: bool,
+    addresses: &[Vec<u8>],
 ) -> Result<Vec<WithdrawalParams>> {
     let whitelist: Vec<_> = token_whitelist.iter().map(|a| a.0.to_vec()).collect();
     // if no threshold, query _all_ ethereum withdrawals since all of them are >= 0.
@@ -841,13 +857,22 @@ pub async fn withdrawals_to_finalize_with_whitelist(
           l2_tx_number_in_block,
           message,
           sender,
-          proof
+          proof,
+          l2_to_l1_events.to_address
         FROM
           finalization_data
           JOIN withdrawals w ON finalization_data.withdrawal_id = w.id
+          JOIN l2_to_l1_events ON
+             finalization_data.l1_batch_number = l2_to_l1_events.l2_block_number
+          AND finalization_data.l2_tx_number_in_block = l2_to_l1_events.tx_number_in_block
         WHERE
           finalization_tx IS NULL
           AND failed_finalization_attempts < 3
+          AND (
+              ($4 AND l2_to_l1_events.to_address = ANY($5))
+                OR
+              (NOT $4 AND NOT l2_to_l1_events.to_address = ANY($5))
+          )
           AND finalization_data.l2_block_number <= COALESCE(
             (
               SELECT
@@ -863,7 +888,7 @@ pub async fn withdrawals_to_finalize_with_whitelist(
             $2 :: BYTEA []
           ))
           AND (
-            CASE WHEN token = decode('000000000000000000000000000000000000800A', 'hex') THEN amount >= $3
+            CASE WHEN token = decode('000000000000000000000000000000000000800A', 'hex') THEN w.amount >= $3
             ELSE TRUE
             END
           )
@@ -873,6 +898,8 @@ pub async fn withdrawals_to_finalize_with_whitelist(
         limit_by as i64,
         &whitelist,
         u256_to_big_decimal(eth_threshold),
+        is_exist,
+        addresses
     )
     .fetch_all(pool)
     .await?
@@ -889,6 +916,7 @@ pub async fn withdrawals_to_finalize_with_whitelist(
         sender: Address::from_slice(&record.sender),
         proof: bincode::deserialize(&record.proof)
             .expect("storage contains data correctly serialized by bincode; qed"),
+        to_address: Address::from_slice(&record.to_address),
     })
     .collect();
 
@@ -900,6 +928,8 @@ pub async fn withdrawals_to_finalize(
     pool: &PgPool,
     limit_by: u64,
     eth_threshold: Option<U256>,
+    is_exist: bool,
+    addresses: &[Vec<u8>],
 ) -> Result<Vec<WithdrawalParams>> {
     let latency = STORAGE_METRICS.call[&"withdrawals_to_finalize"].start();
     // if no threshold, query _all_ ethereum withdrawals since all of them are >= 0.
@@ -917,13 +947,22 @@ pub async fn withdrawals_to_finalize(
           l2_tx_number_in_block,
           message,
           sender,
-          proof
+          proof,
+          l2_to_l1_events.to_address
         FROM
           finalization_data
           JOIN withdrawals w ON finalization_data.withdrawal_id = w.id
+          JOIN l2_to_l1_events ON
+             finalization_data.l1_batch_number = l2_to_l1_events.l2_block_number
+          AND finalization_data.l2_tx_number_in_block = l2_to_l1_events.tx_number_in_block
         WHERE
           finalization_tx IS NULL
           AND failed_finalization_attempts < 3
+          AND (
+              ($3 AND l2_to_l1_events.to_address = ANY($4))
+                OR
+              (NOT $3 AND NOT l2_to_l1_events.to_address = ANY($4))
+          )
           AND finalization_data.l2_block_number <= COALESCE(
             (
               SELECT
@@ -941,7 +980,7 @@ pub async fn withdrawals_to_finalize(
             last_finalization_attempt < NOW() - INTERVAL '1 minutes'
           )
           AND (
-            CASE WHEN token = decode('000000000000000000000000000000000000800A', 'hex') THEN amount >= $2
+            CASE WHEN token = decode('000000000000000000000000000000000000800A', 'hex') THEN w.amount >= $2
             ELSE TRUE
             END
           )
@@ -950,6 +989,8 @@ pub async fn withdrawals_to_finalize(
         ",
         limit_by as i64,
         u256_to_big_decimal(eth_threshold),
+        is_exist,
+        addresses
     )
     .fetch_all(pool)
     .await?
@@ -966,6 +1007,7 @@ pub async fn withdrawals_to_finalize(
         sender: Address::from_slice(&record.sender),
         proof: bincode::deserialize(&record.proof)
             .expect("storage contains data correctly serialized by bincode; qed"),
+        to_address: Address::from_slice(&record.to_address),
     })
     .collect();
 

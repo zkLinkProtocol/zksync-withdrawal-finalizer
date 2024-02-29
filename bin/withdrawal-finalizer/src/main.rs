@@ -218,7 +218,7 @@ async fn main() -> Result<()> {
         tokens.extend_from_slice(custom_tokens.0.as_slice());
     }
 
-    /// l1 events(contains l2 commit prove execute)
+    // l1 events(contains l2 commit prove execute, parse l1 log contains withdraw)
     let event_mux = BlockEvents::new(config.eth_client_ws_url.as_ref());
     let block_events_handle = tokio::spawn(event_mux.run_with_reconnects(
         config.diamond_proxy_addr,
@@ -227,7 +227,7 @@ async fn main() -> Result<()> {
         blocks_tx_wrapped,
     ));
 
-    /// l2 events(ContractDeployed, BridgeBurn, Withdrawal)
+    // l2 events(ContractDeployed, BridgeBurn, Withdrawal)
     let l2_events = L2EventsListener::new(
         config.api_web3_json_rpc_ws_url.as_str(),
         config
@@ -243,7 +243,7 @@ async fn main() -> Result<()> {
         we_tx_wrapped,
     ));
 
-    /// Watcher(receive l1 and l2 event)
+    // Watcher(receive l1 and l2 event)
     // by default meter withdrawals
     let meter_withdrawals = config.enable_withdrawal_metering.unwrap_or(true);
     let watcher = Watcher::new(client_l2.clone(), pgpool.clone(), meter_withdrawals);
@@ -302,6 +302,8 @@ async fn main() -> Result<()> {
         config.tokens_to_finalize.unwrap_or_default(),
         meter_withdrawals,
         eth_finalization_threshold,
+        config.second_chain_gateway_addrs.to_vec(),
+        config.finalize_withdraw_target.unwrap_or_default()
     );
     let finalizer_handle = tokio::spawn(finalizer.run(client_l2));
 

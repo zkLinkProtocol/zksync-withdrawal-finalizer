@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use envconfig::Envconfig;
 use ethers::types::Address;
-use finalizer::{AddrList, TokenList};
+use finalizer::{AddrList, FinalizeWithdrawTarget, TokenList};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -37,6 +37,10 @@ pub struct Config {
     #[envconfig(from = "CONTRACTS_WITHDRAWAL_FINALIZER_CONTRACT")]
     pub withdrawal_finalizer_addr: Address,
 
+    /// Second chain gateway addresses
+    #[envconfig(from = "SECOND_CHAIN_GATEWAY_ADDRS")]
+    pub second_chain_gateway_addrs: AddrList,
+
     /// L2 WS Endpoint
     #[envconfig(from = "API_WEB3_JSON_RPC_WS_URL")]
     pub api_web3_json_rpc_ws_url: Url,
@@ -65,6 +69,9 @@ pub struct Config {
 
     #[envconfig(from = "TX_RETRY_TIMEOUT_SECS")]
     pub tx_retry_timeout: usize,
+
+    #[envconfig(from = "FINALIZE_WITHDRAW_TARGET")]
+    pub finalize_withdraw_target: Option<FinalizeWithdrawTarget>,
 
     #[envconfig(from = "TOKENS_TO_FINALIZE")]
     pub tokens_to_finalize: Option<TokenList>,

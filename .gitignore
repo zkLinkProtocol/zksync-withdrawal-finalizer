@@ -6,3 +6,4 @@ typechain-types
 *.log
 dev.env
 .env
+/.idea/*

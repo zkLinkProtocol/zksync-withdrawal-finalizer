@@ -393,6 +393,7 @@ where
             L2Event::Withdrawal(event) => {
                 tracing::info!("received withdrawal event {event:?}");
                 if event.block_number > curr_l2_block_number {
+                    tracing::info!("process withdrawal event: {}", event.tx_hash);
                     process_withdrawals_in_block(
                         &pool,
                         std::mem::take(&mut in_block_events),
@@ -408,7 +409,7 @@ where
                 storage::add_token(&pool, &event).await?;
             }
             L2Event::RestartedFromBlock(_block_number) => {
-                // The event producer has been restarted at a given
+                // The event producer has been restarted at a givenni
                 // block height. It is going to re-send all events
                 // from that block number up. However the already received
                 // events need to be processed because they may never be sent again.

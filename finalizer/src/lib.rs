@@ -6,6 +6,7 @@
 //! Finalization logic implementation.
 
 use std::{collections::HashSet, str::FromStr, time::Duration};
+use std::ops::Deref;
 
 use accumulator::WithdrawalsAccumulator;
 use ethers::{
@@ -13,8 +14,9 @@ use ethers::{
     providers::{Middleware, MiddlewareError},
     types::{H256, U256},
 };
+use ethers::utils::hex;
 use futures::TryFutureExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
 use client::{
@@ -44,6 +46,29 @@ const OUT_OF_FUNDS_BACKOFF: Duration = Duration::from_secs(10);
 
 /// Backoff period if one of the loop iterations has failed.
 const LOOP_ITERATION_ERROR_BACKOFF: Duration = Duration::from_secs(5);
+
+/// An `enum` that defines target that Finalizer finalizes.
+#[allow(missing_docs)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+pub enum FinalizeWithdrawTarget {
+    All,
+    PrimaryChain,
+    SecondChain,
+}
+
+impl FromStr for FinalizeWithdrawTarget {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        serde_json::from_str(s)
+    }
+}
+
+impl Default for FinalizeWithdrawTarget {
+    fn default() -> Self {
+        Self::All
+    }
+}
 
 /// An `enum` that defines a set of tokens that Finalizer finalizes.
 #[derive(Deserialize, Debug, Eq, PartialEq)]
@@ -77,6 +102,14 @@ impl FromStr for TokenList {
 #[derive(Debug, Eq, PartialEq)]
 pub struct AddrList(pub Vec<Address>);
 
+impl Deref for AddrList {
+    type Target = [Address];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl FromStr for AddrList {
     type Err = serde_json::Error;
 
@@ -103,7 +136,9 @@ pub struct Finalizer<M1, M2> {
     account_address: Address,
     withdrawals_meterer: Option<WithdrawalsMeter>,
     token_list: TokenList,
+    second_chain_gateway_addresses: Vec<Address>,
     eth_threshold: Option<U256>,
+    finalize_withdraw_target: FinalizeWithdrawTarget
 }
 
 const NO_NEW_WITHDRAWALS_BACKOFF: Duration = Duration::from_secs(5);
@@ -134,6 +169,8 @@ where
         token_list: TokenList,
         meter_withdrawals: bool,
         eth_threshold: Option<U256>,
+        gateway_addresses: Vec<Address>,
+        finalize_withdraw_target: FinalizeWithdrawTarget,
     ) -> Self {
         let withdrawals_meterer = meter_withdrawals.then_some(WithdrawalsMeter::new(
             pgpool.clone(),
@@ -159,7 +196,9 @@ where
             account_address,
             withdrawals_meterer,
             token_list,
+            second_chain_gateway_addresses: gateway_addresses,
             eth_threshold,
+            finalize_withdraw_target,
         }
     }
 
@@ -199,6 +238,22 @@ where
             .cloned()
             .map(|r| r.into_request_with_gaslimit(self.one_withdrawal_gas_limit))
             .collect();
+        w.iter()
+            .for_each(|w|
+                tracing::info!(
+                    "RequestFinalizeWithdrawal: \
+                    l_2_block_number: {}\
+                    l_2_message_index: {}\
+                    l_2_tx_number_in_block: {}\
+                    message: {}\
+                    merkle_proof: {:?}\
+                    ",
+                    w.l_2_block_number,
+                    w.l_2_message_index,
+                    w.l_2_tx_number_in_block,
+                    w.message,
+                    w.merkle_proof.iter().map(|p| hex::encode(p.as_ref())).collect::<Vec<_>>(),
+                ));
 
         let results = self
             .finalizer_contract
@@ -352,12 +407,23 @@ where
     async fn loop_iteration(&mut self) -> Result<()> {
         tracing::debug!("begin iteration of the finalizer loop");
 
+        let addresses_bytes = self.second_chain_gateway_addresses
+            .iter()
+            .map(|address| address.as_bytes().to_vec())
+            .collect();
+        let (filter_exist, filter_addresses) = match self.finalize_withdraw_target {
+            FinalizeWithdrawTarget::All => (false, vec![]),
+            FinalizeWithdrawTarget::PrimaryChain => (false, addresses_bytes),
+            FinalizeWithdrawTarget::SecondChain => (true, addresses_bytes)
+        };
         let try_finalize_these = match &self.token_list {
             TokenList::All => {
                 storage::withdrawals_to_finalize(
                     &self.pgpool,
                     self.query_db_pagination_limit,
                     self.eth_threshold,
+                    filter_exist,
+                    &filter_addresses
                 )
                 .await?
             }
@@ -367,6 +433,8 @@ where
                     self.query_db_pagination_limit,
                     w,
                     self.eth_threshold,
+                    filter_exist,
+                    &filter_addresses
                 )
                 .await?
             }
@@ -376,6 +444,8 @@ where
                     self.query_db_pagination_limit,
                     b,
                     self.eth_threshold,
+                    filter_exist,
+                    &filter_addresses
                 )
                 .await?
             }
@@ -393,6 +463,7 @@ where
         let mut iter = try_finalize_these.into_iter().peekable();
 
         while let Some(t) = iter.next() {
+            tracing::info!("Add {:?} tx to accumulator", self.which_chain_tx(&t.to_address));
             accumulator.add_withdrawal(t);
 
             if accumulator.ready_to_finalize() || iter.peek().is_none() {
@@ -424,6 +495,14 @@ where
         }
 
         self.process_unsuccessful().await
+    }
+
+    fn which_chain_tx(&self, target: &Address) -> FinalizeWithdrawTarget {
+        if self.second_chain_gateway_addresses.contains(target) {
+            FinalizeWithdrawTarget::SecondChain
+        } else {
+            FinalizeWithdrawTarget::PrimaryChain
+        }
     }
 
     // process withdrawals that have been predicted as unsuccessful.

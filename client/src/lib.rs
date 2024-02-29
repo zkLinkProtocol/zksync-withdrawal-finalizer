@@ -23,7 +23,7 @@ use ethers::{
 };
 
 use ethers_log_decode::EthLogDecode;
-use ethtoken::codegen::WithdrawalFilter;
+use ethtoken::codegen::{WithdrawalFilter, WithdrawalWithMessageFilter};
 use l1bridge::codegen::{FinalizeWithdrawalCall, IL1Bridge};
 use l1messenger::codegen::L1MessageSentFilter;
 use l2standard_token::codegen::{BridgeBurnFilter, L1AddressCall};
@@ -81,6 +81,7 @@ pub fn is_eth(address: Address) -> bool {
 enum WithdrawalEvents {
     BridgeBurn(BridgeBurnFilter),
     Withdrawal(WithdrawalFilter),
+    WithdrawalWithMessage(WithdrawalWithMessageFilter),
 }
 
 lazy_static! {
@@ -159,6 +160,9 @@ pub struct WithdrawalParams {
 
     /// Proof
     pub proof: Vec<[u8; 32]>,
+
+    /// withdraw to l1 target address
+    pub to_address: Address,
 }
 
 impl WithdrawalParams {
@@ -339,6 +343,7 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
             .filter(|log| {
                 log.topics[0] == BridgeBurnFilter::signature()
                     || log.topics[0] == WithdrawalFilter::signature()
+                    || log.topics[0] == WithdrawalWithMessageFilter::signature()
             })
             .nth(index)
             .ok_or(Error::WithdrawalLogNotFound(index, withdrawal_hash))?;
@@ -346,7 +351,7 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
         let raw_log: RawLog = withdrawal_log.clone().into();
         let withdrawal_event = WithdrawalEvents::decode_log(&raw_log)?;
 
-        let l2_to_l1_message_hash = match withdrawal_event {
+        let (l2_to_l1_message_hash, to_l1_address) = match withdrawal_event {
             WithdrawalEvents::BridgeBurn(b) => {
                 let mut addr_lock = TOKEN_ADDRS.lock().await;
 
@@ -388,9 +393,10 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
 
                 let l1_receiver = withdrawal_initiated_event.l_1_receiver;
 
-                get_l1_bridge_burn_message_keccak(b.amount, l1_receiver, l1_address)?
+                (get_l1_bridge_burn_message_keccak(b.amount, l1_receiver, l1_address)?, Default::default())
             }
-            WithdrawalEvents::Withdrawal(w) => get_l1_withdraw_message_keccak(&w)?,
+            WithdrawalEvents::Withdrawal(w) => (get_l1_withdraw_message_keccak(&w)?, w.l_1_receiver),
+            WithdrawalEvents::WithdrawalWithMessage(w) => (get_l1_withdraw_with_message_keccak(&w)?, w.l_1_receiver)
         };
 
         let l2_to_l1_log_index = receipt
@@ -451,6 +457,7 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
             message,
             sender,
             proof,
+            to_address: to_l1_address,
         }))
     }
 
@@ -588,6 +595,18 @@ fn get_l1_withdraw_message_keccak(withdraw: &WithdrawalFilter) -> Result<H256> {
         Token::FixedBytes(FinalizeEthWithdrawalCall::selector().to_vec()),
         Token::Address(withdraw.l_1_receiver),
         Token::Bytes(withdraw.amount.encode()),
+    ])?;
+
+    Ok(ethers::utils::keccak256(message).into())
+}
+
+fn get_l1_withdraw_with_message_keccak(withdraw: &WithdrawalWithMessageFilter) -> Result<H256> {
+    let message = ethers::abi::encode_packed(&[
+        Token::FixedBytes(FinalizeEthWithdrawalCall::selector().to_vec()),
+        Token::Address(withdraw.l_1_receiver),
+        Token::Bytes(withdraw.amount.encode()),
+        Token::Address(withdraw.l_2_sender),
+        Token::Bytes(withdraw.additional_data.to_vec()),
     ])?;
 
     Ok(ethers::utils::keccak256(message).into())

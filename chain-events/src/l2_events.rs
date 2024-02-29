@@ -4,7 +4,7 @@ use futures::{Sink, SinkExt, StreamExt};
 
 use client::{
     contracts_deployer::codegen::ContractDeployedFilter,
-    ethtoken::codegen::WithdrawalFilter,
+    ethtoken::codegen::{WithdrawalFilter, WithdrawalWithMessageFilter},
     l2standard_token::codegen::{
         BridgeBurnFilter, BridgeInitializationFilter, BridgeInitializeFilter,
     },
@@ -38,6 +38,7 @@ pub struct L2EventsListener {
 enum L2Events {
     BridgeBurn(BridgeBurnFilter),
     Withdrawal(WithdrawalFilter),
+    WithdrawalWithMessage(WithdrawalWithMessageFilter),
     ContractDeployed(ContractDeployedFilter),
 }
 
@@ -335,12 +336,17 @@ impl L2EventsListener {
         let last_seen_l2_token_block: BlockNumber = last_seen_l2_token_block.into();
         let from_block: BlockNumber = from_block.into();
 
-        let past_topic0 = vec![BridgeBurnFilter::signature(), WithdrawalFilter::signature()];
+        let past_topic0 = vec![
+            BridgeBurnFilter::signature(),
+            WithdrawalFilter::signature(),
+            WithdrawalWithMessageFilter::signature(),
+        ];
 
         let topic0 = vec![
             ContractDeployedFilter::signature(),
             BridgeBurnFilter::signature(),
             WithdrawalFilter::signature(),
+            WithdrawalWithMessageFilter::signature(),
         ];
 
         tracing::info!("topic0 {topic0:?}");
@@ -463,7 +469,14 @@ impl L2EventsListener {
         if let (Some(tx_hash), Some(block_number)) = (log.transaction_hash, log.block_number) {
             match l2_event {
                 L2Events::BridgeBurn(BridgeBurnFilter { amount, .. })
-                | L2Events::Withdrawal(WithdrawalFilter { amount, .. }) => {
+                | L2Events::Withdrawal(WithdrawalFilter { amount, .. })
+                | L2Events::WithdrawalWithMessage(WithdrawalWithMessageFilter { amount, .. }) => {
+                    match l2_event {
+                        L2Events::BridgeBurn(_) => tracing::info!("process l2 event: BridgeBurn"),
+                        L2Events::Withdrawal(_) => tracing::info!("process l2 event: Withdrawal"),
+                        L2Events::WithdrawalWithMessage(_) => tracing::info!("process l2 event: WithdrawalWithMessage"),
+                        L2Events::ContractDeployed(_) => tracing::info!("process l2 event: ContractDeployed"),
+                    }
                     CHAIN_EVENTS_METRICS.withdrawal_events.inc();
 
                     let we = WithdrawalEvent {
