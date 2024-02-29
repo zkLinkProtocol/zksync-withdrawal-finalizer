@@ -685,7 +685,7 @@ pub async fn get_withdrawals_with_no_data(
               FROM
                 finalization_data
             ),
-            1
+            0
           )
           AND finalizable = TRUE
         ORDER BY
