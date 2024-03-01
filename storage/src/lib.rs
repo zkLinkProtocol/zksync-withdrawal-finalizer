@@ -576,6 +576,7 @@ pub async fn add_finalization_data(pool: &PgPool, wd: &[WithdrawalParams]) -> Re
     let mut message = Vec::with_capacity(wd.len());
     let mut sender = Vec::with_capacity(wd.len());
     let mut proof = Vec::with_capacity(wd.len());
+    let mut is_primary_chain = Vec::with_capacity(wd.len());
 
     wd.iter().for_each(|d| {
         ids.push(d.id as i64);
@@ -586,14 +587,13 @@ pub async fn add_finalization_data(pool: &PgPool, wd: &[WithdrawalParams]) -> Re
         message.push(d.message.to_vec());
         sender.push(d.sender.0.to_vec());
         proof.push(bincode::serialize(&d.proof).unwrap());
+        is_primary_chain.push(d.is_primary_chain);
     });
 
     let latency = STORAGE_METRICS.call[&"add_withdrawals_data"].start();
 
-    sqlx::query!(
-        "
-        INSERT INTO
-          finalization_data (
+    let sql = "
+        INSERT INTO finalization_data (
             withdrawal_id,
             l2_block_number,
             l1_batch_number,
@@ -601,28 +601,30 @@ pub async fn add_finalization_data(pool: &PgPool, wd: &[WithdrawalParams]) -> Re
             l2_tx_number_in_block,
             message,
             sender,
-            proof
-          )
+            proof,
+            is_primary_chain
+        )
         SELECT
-          u.id,
-          u.l2_block_number,
-          u.l1_batch_number,
-          u.l2_message_index,
-          u.l2_tx_number_in_block,
-          u.message,
-          u.sender,
-          u.proof
-        FROM
-          UNNEST (
-            $1 :: bigint [],
-            $2 :: bigint [],
-            $3 :: bigint [],
-            $4 :: integer [],
-            $5 :: integer [],
-            $6 :: BYTEA [],
-            $7 :: BYTEA [],
-            $8 :: BYTEA []
-          ) AS u(
+            u.id,
+            u.l2_block_number,
+            u.l1_batch_number,
+            u.l2_message_index,
+            u.l2_tx_number_in_block,
+            u.message,
+            u.sender,
+            u.proof,
+            u.is_primary_chain
+        FROM UNNEST (
+            $1::bigint[],
+            $2::bigint[],
+            $3::bigint[],
+            $4::integer[],
+            $5::integer[],
+            $6::bytea[],
+            $7::bytea[],
+            $8::bytea[],
+            $9::boolean[]
+        ) AS u(
             id,
             l2_block_number,
             l1_batch_number,
@@ -630,20 +632,23 @@ pub async fn add_finalization_data(pool: &PgPool, wd: &[WithdrawalParams]) -> Re
             l2_tx_number_in_block,
             message,
             sender,
-            proof
-          ) ON CONFLICT (withdrawal_id) DO NOTHING
-        ",
-        &ids,
-        &l2_block_number,
-        &l1_batch_number,
-        &l2_message_index,
-        &l2_tx_number_in_block,
-        &message,
-        &sender,
-        &proof
-    )
-    .execute(pool)
-    .await?;
+            proof,
+            is_primary_chain
+        )
+    ";
+
+    sqlx::query(sql)
+        .bind(&ids)
+        .bind(&l2_block_number)
+        .bind(&l1_batch_number)
+        .bind(&l2_message_index)
+        .bind(&l2_tx_number_in_block)
+        .bind(&message)
+        .bind(&sender)
+        .bind(&proof)
+        .bind(&is_primary_chain)
+        .execute(pool)
+        .await?;
 
     latency.observe();
 
@@ -747,12 +752,14 @@ pub async fn withdrawals_to_finalize_with_blacklist(
     limit_by: u64,
     token_blacklist: &[Address],
     eth_threshold: Option<U256>,
-    is_exist: bool,
-    addresses: &[Vec<u8>],
+    gate_way_addr: &Option<Address>,
 ) -> Result<Vec<WithdrawalParams>> {
     let blacklist: Vec<_> = token_blacklist.iter().map(|a| a.0.to_vec()).collect();
     // if no threshold, query _all_ ethereum withdrawals since all of them are >= 0.
     let eth_threshold = eth_threshold.unwrap_or(U256::zero());
+
+    let is_gate_way_query = gate_way_addr.is_some();
+    let gate_way_addr = gate_way_addr.as_ref().unwrap().as_bytes();
 
     let data = sqlx::query!(
         "
@@ -767,6 +774,7 @@ pub async fn withdrawals_to_finalize_with_blacklist(
           message,
           sender,
           proof,
+          is_primary_chain,
           l2_to_l1_events.to_address
         FROM
           finalization_data
@@ -778,9 +786,9 @@ pub async fn withdrawals_to_finalize_with_blacklist(
           finalization_tx IS NULL
           AND failed_finalization_attempts < 3
           AND (
-              ($4 AND l2_to_l1_events.to_address = ANY($5))
+              ($4 AND l2_to_l1_events.to_address = $5 AND is_primary_chain = FALSE)
                 OR
-              (NOT $4 AND NOT l2_to_l1_events.to_address = ANY($5))
+              (NOT $4 AND (is_primary_chain IS NULL OR is_primary_chain = TRUE))
           )
           AND finalization_data.l2_block_number <= COALESCE(
             (
@@ -807,8 +815,8 @@ pub async fn withdrawals_to_finalize_with_blacklist(
         limit_by as i64,
         &blacklist,
         u256_to_big_decimal(eth_threshold),
-        is_exist,
-        addresses
+        is_gate_way_query,
+        gate_way_addr
     )
     .fetch_all(pool)
     .await?
@@ -825,6 +833,7 @@ pub async fn withdrawals_to_finalize_with_blacklist(
         sender: Address::from_slice(&record.sender),
         proof: bincode::deserialize(&record.proof)
             .expect("storage contains data correctly serialized by bincode; qed"),
+        is_primary_chain: record.is_primary_chain,
         to_address: Address::from_slice(&record.to_address),
     })
     .collect();
@@ -838,12 +847,14 @@ pub async fn withdrawals_to_finalize_with_whitelist(
     limit_by: u64,
     token_whitelist: &[Address],
     eth_threshold: Option<U256>,
-    is_exist: bool,
-    addresses: &[Vec<u8>],
+    gate_way_addr: &Option<Address>,
 ) -> Result<Vec<WithdrawalParams>> {
     let whitelist: Vec<_> = token_whitelist.iter().map(|a| a.0.to_vec()).collect();
     // if no threshold, query _all_ ethereum withdrawals since all of them are >= 0.
     let eth_threshold = eth_threshold.unwrap_or(U256::zero());
+
+    let is_gate_way_query = gate_way_addr.is_some();
+    let gate_way_addr = gate_way_addr.as_ref().unwrap().as_bytes();
 
     let data = sqlx::query!(
         "
@@ -858,6 +869,7 @@ pub async fn withdrawals_to_finalize_with_whitelist(
           message,
           sender,
           proof,
+          is_primary_chain,
           l2_to_l1_events.to_address
         FROM
           finalization_data
@@ -869,9 +881,9 @@ pub async fn withdrawals_to_finalize_with_whitelist(
           finalization_tx IS NULL
           AND failed_finalization_attempts < 3
           AND (
-              ($4 AND l2_to_l1_events.to_address = ANY($5))
+              ($4 AND l2_to_l1_events.to_address = $5 AND is_primary_chain = FALSE)
                 OR
-              (NOT $4 AND NOT l2_to_l1_events.to_address = ANY($5))
+              (NOT $4 AND (is_primary_chain IS NULL OR is_primary_chain = TRUE))
           )
           AND finalization_data.l2_block_number <= COALESCE(
             (
@@ -898,8 +910,8 @@ pub async fn withdrawals_to_finalize_with_whitelist(
         limit_by as i64,
         &whitelist,
         u256_to_big_decimal(eth_threshold),
-        is_exist,
-        addresses
+        is_gate_way_query,
+        gate_way_addr
     )
     .fetch_all(pool)
     .await?
@@ -916,6 +928,7 @@ pub async fn withdrawals_to_finalize_with_whitelist(
         sender: Address::from_slice(&record.sender),
         proof: bincode::deserialize(&record.proof)
             .expect("storage contains data correctly serialized by bincode; qed"),
+        is_primary_chain: record.is_primary_chain,
         to_address: Address::from_slice(&record.to_address),
     })
     .collect();
@@ -928,12 +941,14 @@ pub async fn withdrawals_to_finalize(
     pool: &PgPool,
     limit_by: u64,
     eth_threshold: Option<U256>,
-    is_exist: bool,
-    addresses: &[Vec<u8>],
+    gate_way_addr: &Option<Address>,
 ) -> Result<Vec<WithdrawalParams>> {
     let latency = STORAGE_METRICS.call[&"withdrawals_to_finalize"].start();
     // if no threshold, query _all_ ethereum withdrawals since all of them are >= 0.
     let eth_threshold = eth_threshold.unwrap_or(U256::zero());
+
+    let is_gate_way_query = gate_way_addr.is_some();
+    let gate_way_addr = gate_way_addr.as_ref().unwrap().as_bytes();
 
     let data = sqlx::query!(
         "
@@ -948,6 +963,7 @@ pub async fn withdrawals_to_finalize(
           message,
           sender,
           proof,
+          is_primary_chain,
           l2_to_l1_events.to_address
         FROM
           finalization_data
@@ -959,9 +975,9 @@ pub async fn withdrawals_to_finalize(
           finalization_tx IS NULL
           AND failed_finalization_attempts < 3
           AND (
-              ($3 AND l2_to_l1_events.to_address = ANY($4))
+              ($3 AND l2_to_l1_events.to_address = $4 AND is_primary_chain = FALSE)
                 OR
-              (NOT $3 AND NOT l2_to_l1_events.to_address = ANY($4))
+              (NOT $3 AND (is_primary_chain IS NULL OR is_primary_chain = TRUE))
           )
           AND finalization_data.l2_block_number <= COALESCE(
             (
@@ -989,8 +1005,8 @@ pub async fn withdrawals_to_finalize(
         ",
         limit_by as i64,
         u256_to_big_decimal(eth_threshold),
-        is_exist,
-        addresses
+        is_gate_way_query,
+        gate_way_addr
     )
     .fetch_all(pool)
     .await?
@@ -1007,6 +1023,7 @@ pub async fn withdrawals_to_finalize(
         sender: Address::from_slice(&record.sender),
         proof: bincode::deserialize(&record.proof)
             .expect("storage contains data correctly serialized by bincode; qed"),
+        is_primary_chain: record.is_primary_chain,
         to_address: Address::from_slice(&record.to_address),
     })
     .collect();

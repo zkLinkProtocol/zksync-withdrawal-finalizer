@@ -161,6 +161,9 @@ pub struct WithdrawalParams {
     /// Proof
     pub proof: Vec<[u8; 32]>,
 
+    /// is primary chain
+    pub is_primary_chain: Option<bool>,
+
     /// withdraw to l1 target address
     pub to_address: Address,
 }
@@ -457,6 +460,7 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
             message,
             sender,
             proof,
+            is_primary_chain: None,
             to_address: to_l1_address,
         }))
     }

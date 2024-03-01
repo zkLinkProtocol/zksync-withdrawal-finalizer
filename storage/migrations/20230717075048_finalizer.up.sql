@@ -2,7 +2,8 @@ ALTER TABLE withdrawals DROP COLUMN is_finalized;
 ALTER TABLE withdrawals ADD id BIGSERIAL NOT NULL UNIQUE;
 
 CREATE TABLE finalization_data (
-    withdrawal_id BIGINT NOT NULL UNIQUE, 
+    withdrawal_id BIGINT NOT NULL,
+    is_primary_chain BOOLEAN,
 
     l2_block_number BIGINT NOT NULL,
     l1_batch_number BIGINT NOT NULL,

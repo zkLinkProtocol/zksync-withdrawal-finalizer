@@ -25,6 +25,7 @@ use client::{l1bridge::codegen::IL1Bridge, zksync_contract::codegen::IZkSync, Zk
 use config::Config;
 use tokio::sync::watch;
 use vise_exporter::MetricsExporter;
+use client::withdrawal_finalizer::codegen::WithdrawalFinalizer;
 use watcher::Watcher;
 
 use crate::metrics::MAIN_FINALIZER_METRICS;
@@ -269,9 +270,9 @@ async fn main() -> Result<()> {
             .unwrap(),
     );
     let finalizer_account_address = client_l1_with_signer.address();
-    let contract = client::withdrawal_finalizer::codegen::WithdrawalFinalizer::new(
+    let contract = WithdrawalFinalizer::new(
         config.withdrawal_finalizer_addr,
-        client_l1_with_signer,
+        client_l1_with_signer.clone(),
     );
     let batch_finalization_gas_limit = U256::from_dec_str(&config.batch_finalization_gas_limit)?;
     let one_withdrawal_gas_limit = U256::from_dec_str(&config.one_withdrawal_gas_limit)?;
@@ -289,20 +290,34 @@ async fn main() -> Result<()> {
         None => None,
     };
     let l1_bridge = IL1Bridge::new(config.l1_erc20_bridge_proxy_addr, client_l1.clone());
-    let zksync_contract = IZkSync::new(config.diamond_proxy_addr, client_l1);
+    let zksync_contract = IZkSync::new(config.diamond_proxy_addr, client_l1.clone());
+    let second_chain_main_contract = config.second_chain_gateway_addrs
+        .iter()
+        .zip(config.second_chain_diamond_proxy_addrs.iter())
+        .zip(config.second_chain_withdrawal_finalizer_addrs.iter())
+        .zip(config.second_chain_l1_erc20_bridge_proxy_addrs.iter())
+        .map(|(((&gateway_address, zksync_contract), finalizer_contract), l1_erc20_bridge_proxy)| {
+            finalizer::SecondChainFinalizer {
+                finalizer_contract: WithdrawalFinalizer::new(*finalizer_contract, client_l1_with_signer.clone()),
+                zksync_contract: IZkSync::new(*zksync_contract, client_l1.clone()),
+                l1_bridge: IL1Bridge::new(*l1_erc20_bridge_proxy, client_l1.clone()),
+                gateway_address,
+            }
+        })
+        .collect::<Vec<_>>();
     let finalizer = finalizer::Finalizer::new(
         pgpool.clone(),
         one_withdrawal_gas_limit,
         batch_finalization_gas_limit,
         contract,
         zksync_contract,
+        second_chain_main_contract,
         l1_bridge,
         config.tx_retry_timeout,
         finalizer_account_address,
         config.tokens_to_finalize.unwrap_or_default(),
         meter_withdrawals,
         eth_finalization_threshold,
-        config.second_chain_gateway_addrs.to_vec(),
         config.finalize_withdraw_target.unwrap_or_default()
     );
     let finalizer_handle = tokio::spawn(finalizer.run(client_l2));
