@@ -13,7 +13,7 @@ use ethers::{
     providers::{Middleware, MiddlewareError},
     types::{H256, U256},
 };
-use ethers::utils::hex;
+use ethers::contract::ContractError;
 use futures::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -26,6 +26,7 @@ use client::{
     l1bridge::codegen::IL1Bridge, withdrawal_finalizer::codegen::WithdrawalFinalizer,
     zksync_contract::codegen::IZkSync, WithdrawalParams, ZksyncMiddleware,
 };
+use url::Url;
 use withdrawals_meterer::{MeteringComponent, WithdrawalsMeter};
 
 use crate::{
@@ -120,6 +121,26 @@ impl FromStr for AddrList {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct UrlList(pub Vec<Url>);
+
+impl Deref for UrlList {
+    type Target = [Url];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl FromStr for UrlList {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let res: Vec<Url> = serde_json::from_str(s)?;
+        Ok(UrlList(res))
+    }
+}
+
 /// Finalizer.
 #[derive(Clone)]
 pub struct Finalizer<M1, M2> where
@@ -142,7 +163,8 @@ pub struct Finalizer<M1, M2> where
     withdrawals_meterer: Option<WithdrawalsMeter>,
     token_list: TokenList,
 
-    current_gate_way_address: Option<Address>,
+    // None is primary chain, Some is secondary chain
+    selected_gate_way_address: Option<Address>,
     second_chains: Vec<SecondChainFinalizer<M1, M2>>,
 
     eth_threshold: Option<U256>,
@@ -204,7 +226,7 @@ where
             account_address,
             withdrawals_meterer,
             token_list,
-            current_gate_way_address: None,
+            selected_gate_way_address: None,
             second_chains,
             eth_threshold,
             finalize_withdraw_target,
@@ -212,7 +234,7 @@ where
     }
 
     pub fn finalizer_contract(&self) -> &WithdrawalFinalizer<S> {
-        if let Some(address) = self.current_gate_way_address {
+        if let Some(address) = self.selected_gate_way_address {
             &self.second_chains
                 .iter()
                 .find(|chain| chain.gateway_address == address)
@@ -223,20 +245,8 @@ where
         }
     }
 
-    pub fn zksync_contract(&self) -> &IZkSync<M> {
-        if let Some(address) = self.current_gate_way_address {
-            &self.second_chains
-                .iter()
-                .find(|chain| chain.gateway_address == address)
-                .unwrap()
-                .zksync_contract
-        } else {
-            &self.zksync_contract
-        }
-    }
-
     pub fn l1_bridge(&self) -> &IL1Bridge<M> {
-        if let Some(address) = self.current_gate_way_address {
+        if let Some(address) = self.selected_gate_way_address {
             &self.second_chains
                 .iter()
                 .find(|chain| chain.gateway_address == address)
@@ -244,6 +254,22 @@ where
                 .l1_bridge
         } else {
             &self.l1_bridge
+        }
+    }
+
+    async fn synced_batch_number(&self) -> std::result::Result<U256, ContractError<M>> {
+        if let Some(address) = self.selected_gate_way_address {
+            self.second_chains
+                .iter()
+                .find(|chain| chain.gateway_address == address)
+                .unwrap()
+                .zklink_contract
+                .get_total_batches_executed()
+                .await
+        } else {
+            self.zksync_contract
+                .get_total_batches_executed()
+                .await
         }
     }
 
@@ -257,22 +283,22 @@ where
         let params_fetcher_handle = tokio::spawn(params_fetcher_loop(
             self.pgpool.clone(),
             middleware,
-            self.zksync_contract().clone(),
+            self.zksync_contract.clone(),
             self.l1_bridge().clone(),
             self.second_chains.clone(),
         ));
 
         use FinalizeWithdrawTarget::*;
         let mut finalizer_handles = Vec::new();
-        if self.finalize_withdraw_target == All || self.finalize_withdraw_target == PrimaryChain {
+        if self.finalize_withdraw_target == All || self.finalize_withdraw_target == SecondChain {
             for chain in self.second_chains.iter() {
                 let mut finalizer = self.clone();
-                finalizer.current_gate_way_address = Some(chain.gateway_address);
+                finalizer.selected_gate_way_address = Some(chain.gateway_address);
                 finalizer_handles.push(tokio::spawn(finalizer.finalizer_loop()));
             }
         }
 
-        if self.finalize_withdraw_target == All || self.finalize_withdraw_target == SecondChain {
+        if self.finalize_withdraw_target == All || self.finalize_withdraw_target == PrimaryChain {
             finalizer_handles.push(tokio::spawn(self.finalizer_loop()));
         }
 
@@ -302,19 +328,18 @@ where
             .for_each(|w|
                 tracing::info!(
                     "RequestFinalizeWithdrawal: \
-                    l_2_block_number: {}\
-                    l_2_message_index: {}\
-                    l_2_tx_number_in_block: {}\
-                    message: {}\
-                    merkle_proof: {:?}\
+                    l_2_block_number: {} \
+                    l_2_message_index: {} \
+                    l_2_tx_number_in_block: {} \
+                    message: {} \
+                    merkle_proof: {:?} \
                     ",
                     w.l_2_block_number,
                     w.l_2_message_index,
                     w.l_2_tx_number_in_block,
                     w.message,
-                    w.merkle_proof.iter().map(|p| hex::encode(p.as_ref())).collect::<Vec<_>>(),
+                    w.merkle_proof.iter().map(|p| ethers::utils::hex::encode(p.as_ref())).collect::<Vec<_>>(),
                 ));
-
         let results = self
             .finalizer_contract
             .finalize_withdrawals(w)
@@ -334,7 +359,7 @@ where
         };
 
         tracing::info!(
-            "finalizing batch {:?}",
+            "finalizing batch withdrawal_ids: {:?}",
             withdrawals.iter().map(|w| w.id).collect::<Vec<_>>()
         );
 
@@ -465,7 +490,8 @@ where
     }
 
     async fn loop_iteration(&mut self) -> Result<()> {
-        tracing::debug!("begin iteration of the finalizer loop");
+        let total_executed_batches_number = self.synced_batch_number().await?.as_u32() as i64;
+        tracing::info!("begin iteration of the finalizer loop: Batch Number({})", total_executed_batches_number);
 
         let try_finalize_these = match &self.token_list {
             TokenList::All => {
@@ -473,7 +499,8 @@ where
                     &self.pgpool,
                     self.query_db_pagination_limit,
                     self.eth_threshold,
-                    &self.current_gate_way_address
+                    &self.selected_gate_way_address,
+                    total_executed_batches_number
                 )
                 .await?
             }
@@ -483,7 +510,8 @@ where
                     self.query_db_pagination_limit,
                     w,
                     self.eth_threshold,
-                    &self.current_gate_way_address
+                    &self.selected_gate_way_address,
+                    total_executed_batches_number
                 )
                 .await?
             }
@@ -493,7 +521,8 @@ where
                     self.query_db_pagination_limit,
                     b,
                     self.eth_threshold,
-                    &self.current_gate_way_address
+                    &self.selected_gate_way_address,
+                    total_executed_batches_number
                 )
                 .await?
             }
@@ -504,6 +533,7 @@ where
 
         if try_finalize_these.is_empty() {
             tokio::time::sleep(self.no_new_withdrawals_backoff).await;
+            tracing::info!("There are currently no transactions that need to be finalized!");
             return Ok(());
         }
 
@@ -511,7 +541,7 @@ where
         let mut iter = try_finalize_these.into_iter().peekable();
 
         while let Some(t) = iter.next() {
-            tracing::info!("Add {:?} tx to accumulator", self.which_chain_tx(&t.to_address));
+            tracing::info!("Add tx[{}] to {:?}[{}] accumulator", t.tx_hash, self.which_chain_tx(&t.to_address), t.to_address);
             accumulator.add_withdrawal(t);
 
             if accumulator.ready_to_finalize() || iter.peek().is_none() {
@@ -526,9 +556,9 @@ where
                     .predicted_to_fail_withdrawals
                     .inc_by(predicted_to_fail.len() as u64);
 
-                tracing::debug!("predicted to fail: {predicted_to_fail:?}");
 
                 if !predicted_to_fail.is_empty() {
+                    tracing::warn!("predicted to fail: {predicted_to_fail:?}");
                     let mut removed = accumulator.remove_unsuccessful(&predicted_to_fail);
 
                     self.unsuccessful.append(&mut removed);
@@ -568,7 +598,7 @@ where
         let predicted = std::mem::take(&mut self.unsuccessful);
         tracing::debug!("requesting finalization status of withdrawals");
         let are_finalized =
-            get_finalized_withdrawals(&predicted, self.zksync_contract(), self.l1_bridge(), &self.second_chains).await?;
+            get_finalized_withdrawals(&predicted, &self.zksync_contract, self.l1_bridge(), &self.second_chains).await?;
 
         let mut already_finalized = vec![];
         let mut unsuccessful = vec![];
@@ -633,21 +663,33 @@ where
             let l1_batch_number = U256::from(wd.l1_batch_number.as_u64());
             let l2_message_index = U256::from(wd.l2_message_index);
 
-            let (contract, bridge) = if let Some(false) = wd.is_primary_chain {
-                let chain = second_chains
+            let bridge = if let Some(false) = wd.is_primary_chain {
+                &second_chains
                     .iter()
                     .find(|chain| chain.gateway_address == wd.to_address)
-                    .unwrap();
-                (&chain.zksync_contract, &chain.l1_bridge)
+                    .unwrap()
+                    .l1_bridge
             } else {
-                (zksync_contract, l1_bridge)
+                l1_bridge
             };
             if is_eth(wd.sender) {
-                contract
-                    .is_eth_withdrawal_finalized(l1_batch_number, l2_message_index)
-                    .call()
-                    .await
-                    .map_err(|e| e.into())
+                if let Some(false) = wd.is_primary_chain {
+                    second_chains
+                        .iter()
+                        .find(|chain| chain.gateway_address == wd.to_address)
+                        .unwrap()
+                        .zklink_contract
+                        .is_eth_withdrawal_finalized(l1_batch_number, l2_message_index)
+                        .call()
+                        .await
+                        .map_err(|e| e.into())
+                } else {
+                    zksync_contract
+                        .is_eth_withdrawal_finalized(l1_batch_number, l2_message_index)
+                        .call()
+                        .await
+                        .map_err(|e| e.into())
+                }
             } else {
                 bridge
                     .is_withdrawal_finalized(l1_batch_number, l2_message_index)

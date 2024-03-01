@@ -1536,6 +1536,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tx-sender",
+ "url",
  "vise",
  "withdrawals-meterer",
 ]

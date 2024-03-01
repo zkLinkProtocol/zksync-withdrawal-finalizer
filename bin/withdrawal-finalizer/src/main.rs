@@ -26,6 +26,7 @@ use config::Config;
 use tokio::sync::watch;
 use vise_exporter::MetricsExporter;
 use client::withdrawal_finalizer::codegen::WithdrawalFinalizer;
+use client::zklink_contract::codegen::ZkLink;
 use watcher::Watcher;
 
 use crate::metrics::MAIN_FINALIZER_METRICS;
@@ -265,9 +266,9 @@ async fn main() -> Result<()> {
 
     let wallet = config.account_private_key.parse::<LocalWallet>()?;
     let client_l1_with_signer = Arc::new(
-        SignerMiddleware::new_with_provider_chain(client_l1.clone(), wallet)
+        SignerMiddleware::new_with_provider_chain(client_l1.clone(), wallet.clone())
             .await
-            .unwrap(),
+            .unwrap()
     );
     let finalizer_account_address = client_l1_with_signer.address();
     let contract = WithdrawalFinalizer::new(
@@ -291,20 +292,33 @@ async fn main() -> Result<()> {
     };
     let l1_bridge = IL1Bridge::new(config.l1_erc20_bridge_proxy_addr, client_l1.clone());
     let zksync_contract = IZkSync::new(config.diamond_proxy_addr, client_l1.clone());
-    let second_chain_main_contract = config.second_chain_gateway_addrs
+
+    let mut second_chain_main_contract = Vec::new();
+    for ((
+        ((&gateway_address, zklink_contract), finalizer_contract),
+        l1_erc20_bridge_proxy), sencond_chain_web3_url
+    ) in config.second_chain_gateway_addrs
         .iter()
         .zip(config.second_chain_diamond_proxy_addrs.iter())
         .zip(config.second_chain_withdrawal_finalizer_addrs.iter())
         .zip(config.second_chain_l1_erc20_bridge_proxy_addrs.iter())
-        .map(|(((&gateway_address, zksync_contract), finalizer_contract), l1_erc20_bridge_proxy)| {
-            finalizer::SecondChainFinalizer {
-                finalizer_contract: WithdrawalFinalizer::new(*finalizer_contract, client_l1_with_signer.clone()),
-                zksync_contract: IZkSync::new(*zksync_contract, client_l1.clone()),
-                l1_bridge: IL1Bridge::new(*l1_erc20_bridge_proxy, client_l1.clone()),
-                gateway_address,
-            }
+        .zip(config.secondary_chain_client_http_url.iter())
+    {
+        let provider_l1 = Provider::<Http>::try_from(sencond_chain_web3_url.as_ref()).unwrap();
+        let client_l1 = Arc::new(provider_l1);
+        let client_l1_with_signer = Arc::new(
+            SignerMiddleware::new_with_provider_chain(client_l1.clone(), wallet.clone())
+                .await
+                .unwrap(),
+        );
+        second_chain_main_contract.push(finalizer::SecondChainFinalizer {
+            finalizer_contract: WithdrawalFinalizer::new(*finalizer_contract, client_l1_with_signer.clone()),
+            zklink_contract: ZkLink::new(*zklink_contract, client_l1.clone()),
+            l1_bridge: IL1Bridge::new(*l1_erc20_bridge_proxy, client_l1.clone()),
+            gateway_address,
         })
-        .collect::<Vec<_>>();
+    }
+
     let finalizer = finalizer::Finalizer::new(
         pgpool.clone(),
         one_withdrawal_gas_limit,

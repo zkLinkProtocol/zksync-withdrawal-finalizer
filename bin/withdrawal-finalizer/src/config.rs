@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use envconfig::Envconfig;
 use ethers::types::Address;
-use finalizer::{AddrList, FinalizeWithdrawTarget, TokenList};
+use finalizer::{AddrList, FinalizeWithdrawTarget, TokenList, UrlList};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -20,6 +20,10 @@ pub struct Config {
     /// L1 HTTP url.
     #[envconfig(from = "ETH_CLIENT_HTTP_URL")]
     pub eth_client_http_url: Url,
+
+    /// L1 secondary chain HTTP url.
+    #[envconfig(from = "SECOND_CHAIN_CLIENT_HTTP_URL")]
+    pub secondary_chain_client_http_url: UrlList,
 
     /// Address of the `L1Bridge` contract.
     #[envconfig(from = "CONTRACTS_L1_ERC20_BRIDGE_PROXY_ADDR")]

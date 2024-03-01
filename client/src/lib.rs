@@ -1,5 +1,4 @@
 #![deny(unused_crate_dependencies)]
-#![warn(missing_docs)]
 #![warn(unused_extern_crates)]
 #![warn(unused_imports)]
 
@@ -71,6 +70,8 @@ pub mod l2standard_token;
 pub mod withdrawal_finalizer;
 pub mod zksync_contract;
 pub mod zksync_types;
+pub mod zklink_getters;
+pub mod zklink_contract;
 
 /// is this eth?
 pub fn is_eth(address: Address) -> bool {
@@ -124,6 +125,9 @@ pub struct WithdrawalKey {
 
     /// Event index of withdrawal within the transaction
     pub event_index_in_tx: u32,
+
+    /// is primary chain
+    pub is_primary_chain: Option<bool>,
 }
 
 /// Withdrawal parameters
@@ -174,6 +178,7 @@ impl WithdrawalParams {
         WithdrawalKey {
             tx_hash: self.tx_hash,
             event_index_in_tx: self.event_index_in_tx,
+            is_primary_chain: self.is_primary_chain,
         }
     }
 }
