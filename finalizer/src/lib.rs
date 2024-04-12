@@ -1,11 +1,11 @@
 #![deny(unused_crate_dependencies)]
-#![warn(missing_docs)]
 #![warn(unused_extern_crates)]
 #![warn(unused_imports)]
 
 //! Finalization logic implementation.
 
 use std::{collections::HashSet, str::FromStr, time::Duration};
+use std::ops::Deref;
 
 use accumulator::WithdrawalsAccumulator;
 use ethers::{
@@ -13,8 +13,9 @@ use ethers::{
     providers::{Middleware, MiddlewareError},
     types::{H256, U256},
 };
+use ethers::contract::ContractError;
 use futures::TryFutureExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
 use client::{
@@ -25,14 +26,17 @@ use client::{
     l1bridge::codegen::IL1Bridge, withdrawal_finalizer::codegen::WithdrawalFinalizer,
     zksync_contract::codegen::IZkSync, WithdrawalParams, ZksyncMiddleware,
 };
+use url::Url;
 use withdrawals_meterer::{MeteringComponent, WithdrawalsMeter};
 
 use crate::{
     error::{Error, Result},
     metrics::FINALIZER_METRICS,
 };
+pub use crate::second_chain::SecondChainFinalizer;
 
 mod accumulator;
+mod second_chain;
 mod error;
 mod metrics;
 
@@ -45,8 +49,31 @@ const OUT_OF_FUNDS_BACKOFF: Duration = Duration::from_secs(10);
 /// Backoff period if one of the loop iterations has failed.
 const LOOP_ITERATION_ERROR_BACKOFF: Duration = Duration::from_secs(5);
 
+/// An `enum` that defines target that Finalizer finalizes.
+#[allow(missing_docs)]
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub enum FinalizeWithdrawTarget {
+    All,
+    PrimaryChain,
+    SecondChain,
+}
+
+impl FromStr for FinalizeWithdrawTarget {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        serde_json::from_str(s)
+    }
+}
+
+impl Default for FinalizeWithdrawTarget {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
 /// An `enum` that defines a set of tokens that Finalizer finalizes.
-#[derive(Deserialize, Debug, Eq, PartialEq)]
+#[derive(Deserialize, Debug, Clone, Eq, PartialEq)]
 pub enum TokenList {
     /// Finalize all known tokens
     All,
@@ -77,6 +104,14 @@ impl FromStr for TokenList {
 #[derive(Debug, Eq, PartialEq)]
 pub struct AddrList(pub Vec<Address>);
 
+impl Deref for AddrList {
+    type Target = [Address];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl FromStr for AddrList {
     type Err = serde_json::Error;
 
@@ -86,8 +121,32 @@ impl FromStr for AddrList {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct UrlList(pub Vec<Url>);
+
+impl Deref for UrlList {
+    type Target = [Url];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl FromStr for UrlList {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let res: Vec<Url> = serde_json::from_str(s)?;
+        Ok(UrlList(res))
+    }
+}
+
 /// Finalizer.
-pub struct Finalizer<M1, M2> {
+#[derive(Clone)]
+pub struct Finalizer<M1, M2> where
+    M1: Clone,
+    M2: Clone,
+{
     pgpool: PgPool,
     one_withdrawal_gas_limit: U256,
     batch_finalization_gas_limit: U256,
@@ -103,7 +162,13 @@ pub struct Finalizer<M1, M2> {
     account_address: Address,
     withdrawals_meterer: Option<WithdrawalsMeter>,
     token_list: TokenList,
+
+    // None is primary chain, Some is secondary chain
+    selected_gate_way_address: Option<Address>,
+    second_chains: Vec<SecondChainFinalizer<M1, M2>>,
+
     eth_threshold: Option<U256>,
+    finalize_withdraw_target: FinalizeWithdrawTarget
 }
 
 const NO_NEW_WITHDRAWALS_BACKOFF: Duration = Duration::from_secs(5);
@@ -111,8 +176,8 @@ const QUERY_DB_PAGINATION_LIMIT: u64 = 50;
 
 impl<S, M> Finalizer<S, M>
 where
-    S: Middleware + 'static,
-    M: Middleware + 'static,
+    S: Middleware + Clone + 'static,
+    M: Middleware + Clone + 'static,
 {
     /// Create a new [`Finalizer`].
     ///
@@ -128,12 +193,14 @@ where
         batch_finalization_gas_limit: U256,
         finalizer_contract: WithdrawalFinalizer<S>,
         zksync_contract: IZkSync<M>,
+        second_chains: Vec<SecondChainFinalizer<S, M>>,
         l1_bridge: IL1Bridge<M>,
         tx_retry_timeout: usize,
         account_address: Address,
         token_list: TokenList,
         meter_withdrawals: bool,
         eth_threshold: Option<U256>,
+        finalize_withdraw_target: FinalizeWithdrawTarget,
     ) -> Self {
         let withdrawals_meterer = meter_withdrawals.then_some(WithdrawalsMeter::new(
             pgpool.clone(),
@@ -159,7 +226,50 @@ where
             account_address,
             withdrawals_meterer,
             token_list,
+            selected_gate_way_address: None,
+            second_chains,
             eth_threshold,
+            finalize_withdraw_target,
+        }
+    }
+
+    pub fn finalizer_contract(&self) -> &WithdrawalFinalizer<S> {
+        if let Some(address) = self.selected_gate_way_address {
+            &self.second_chains
+                .iter()
+                .find(|chain| chain.gateway_address == address)
+                .unwrap()
+                .finalizer_contract
+        } else {
+            &self.finalizer_contract
+        }
+    }
+
+    pub fn l1_bridge(&self) -> &IL1Bridge<M> {
+        if let Some(address) = self.selected_gate_way_address {
+            &self.second_chains
+                .iter()
+                .find(|chain| chain.gateway_address == address)
+                .unwrap()
+                .l1_bridge
+        } else {
+            &self.l1_bridge
+        }
+    }
+
+    async fn synced_batch_number(&self) -> std::result::Result<U256, ContractError<M>> {
+        if let Some(address) = self.selected_gate_way_address {
+            self.second_chains
+                .iter()
+                .find(|chain| chain.gateway_address == address)
+                .unwrap()
+                .zklink_contract
+                .get_total_batches_executed()
+                .await
+        } else {
+            self.zksync_contract
+                .get_total_batches_executed()
+                .await
         }
     }
 
@@ -174,17 +284,32 @@ where
             self.pgpool.clone(),
             middleware,
             self.zksync_contract.clone(),
-            self.l1_bridge.clone(),
+            self.l1_bridge().clone(),
+            self.second_chains.clone(),
         ));
 
-        let finalizer_handle = tokio::spawn(self.finalizer_loop());
+        use FinalizeWithdrawTarget::*;
+        let mut finalizer_handles = Vec::new();
+        if self.finalize_withdraw_target == All || self.finalize_withdraw_target == SecondChain {
+            for chain in self.second_chains.iter() {
+                let mut finalizer = self.clone();
+                finalizer.selected_gate_way_address = Some(chain.gateway_address);
+                finalizer_handles.push(tokio::spawn(finalizer.finalizer_loop()));
+            }
+        }
+
+        if self.finalize_withdraw_target == All || self.finalize_withdraw_target == PrimaryChain {
+            finalizer_handles.push(tokio::spawn(self.finalizer_loop()));
+        }
+
+        let (second_result, _, _) = futures::future::select_all(finalizer_handles).await;
 
         tokio::select! {
             m = params_fetcher_handle => {
                 tracing::error!("migrator ended with {m:?}");
             }
-            f = finalizer_handle => {
-                tracing::error!("finalizer ended with {f:?}");
+            s = async { second_result } => {
+                tracing::error!("A second finalizer ended with {s:?}");
             }
         }
 
@@ -192,14 +317,29 @@ where
     }
 
     async fn predict_fails<'a, W: Iterator<Item = &'a WithdrawalParams>>(
-        &mut self,
+        &self,
         withdrawals: W,
     ) -> Result<Vec<FinalizeResult>> {
         let w: Vec<_> = withdrawals
             .cloned()
             .map(|r| r.into_request_with_gaslimit(self.one_withdrawal_gas_limit))
             .collect();
-
+        w.iter()
+            .for_each(|w|
+                tracing::info!(
+                    "RequestFinalizeWithdrawal: \
+                    l_2_block_number: {} \
+                    l_2_message_index: {} \
+                    l_2_tx_number_in_block: {} \
+                    message: {} \
+                    merkle_proof: {:?} \
+                    ",
+                    w.l_2_block_number,
+                    w.l_2_message_index,
+                    w.l_2_tx_number_in_block,
+                    w.message,
+                    w.merkle_proof.iter().map(|p| ethers::utils::hex::encode(p.as_ref())).collect::<Vec<_>>(),
+                ));
         let results = self
             .finalizer_contract
             .finalize_withdrawals(w)
@@ -219,7 +359,7 @@ where
         };
 
         tracing::info!(
-            "finalizing batch {:?}",
+            "finalizing batch withdrawal_ids: {:?}",
             withdrawals.iter().map(|w| w.id).collect::<Vec<_>>()
         );
 
@@ -229,16 +369,16 @@ where
             .map(|r| r.into_request_with_gaslimit(self.one_withdrawal_gas_limit))
             .collect();
 
-        let tx = self.finalizer_contract.finalize_withdrawals(w);
+        let tx = self.finalizer_contract().finalize_withdrawals(w);
         let nonce = self
-            .finalizer_contract
+            .finalizer_contract()
             .client()
             .get_transaction_count(self.account_address, None)
             .await
             .map_err(|e| Error::Middleware(format!("{e}")))?;
 
         let tx = tx_sender::send_tx_adjust_gas(
-            self.finalizer_contract.client(),
+            self.finalizer_contract().client(),
             tx.tx.clone(),
             self.tx_retry_timeout,
             nonce,
@@ -322,7 +462,7 @@ where
     // Create a new withdrawal accumulator given the current gas price.
     async fn new_accumulator(&self) -> Result<WithdrawalsAccumulator> {
         let gas_price = self
-            .finalizer_contract
+            .finalizer_contract()
             .client()
             .get_gas_price()
             .await
@@ -350,7 +490,8 @@ where
     }
 
     async fn loop_iteration(&mut self) -> Result<()> {
-        tracing::debug!("begin iteration of the finalizer loop");
+        let total_executed_batches_number = self.synced_batch_number().await?.as_u32() as i64;
+        tracing::info!("begin iteration of the finalizer loop: Batch Number({})", total_executed_batches_number);
 
         let try_finalize_these = match &self.token_list {
             TokenList::All => {
@@ -358,6 +499,8 @@ where
                     &self.pgpool,
                     self.query_db_pagination_limit,
                     self.eth_threshold,
+                    &self.selected_gate_way_address,
+                    total_executed_batches_number
                 )
                 .await?
             }
@@ -367,6 +510,8 @@ where
                     self.query_db_pagination_limit,
                     w,
                     self.eth_threshold,
+                    &self.selected_gate_way_address,
+                    total_executed_batches_number
                 )
                 .await?
             }
@@ -376,6 +521,8 @@ where
                     self.query_db_pagination_limit,
                     b,
                     self.eth_threshold,
+                    &self.selected_gate_way_address,
+                    total_executed_batches_number
                 )
                 .await?
             }
@@ -386,6 +533,7 @@ where
 
         if try_finalize_these.is_empty() {
             tokio::time::sleep(self.no_new_withdrawals_backoff).await;
+            tracing::info!("There are currently no transactions that need to be finalized!");
             return Ok(());
         }
 
@@ -393,6 +541,7 @@ where
         let mut iter = try_finalize_these.into_iter().peekable();
 
         while let Some(t) = iter.next() {
+            tracing::info!("Add tx[{}] to {:?}[{}] accumulator", t.tx_hash, self.which_chain_tx(&t.to_address), t.to_address);
             accumulator.add_withdrawal(t);
 
             if accumulator.ready_to_finalize() || iter.peek().is_none() {
@@ -407,9 +556,9 @@ where
                     .predicted_to_fail_withdrawals
                     .inc_by(predicted_to_fail.len() as u64);
 
-                tracing::debug!("predicted to fail: {predicted_to_fail:?}");
 
                 if !predicted_to_fail.is_empty() {
+                    tracing::warn!("predicted to fail: {predicted_to_fail:?}");
                     let mut removed = accumulator.remove_unsuccessful(&predicted_to_fail);
 
                     self.unsuccessful.append(&mut removed);
@@ -424,6 +573,14 @@ where
         }
 
         self.process_unsuccessful().await
+    }
+
+    fn which_chain_tx(&self, target: &Address) -> FinalizeWithdrawTarget {
+        if self.second_chains.iter().any(|c| &c.gateway_address == target) {
+            FinalizeWithdrawTarget::SecondChain
+        } else {
+            FinalizeWithdrawTarget::PrimaryChain
+        }
     }
 
     // process withdrawals that have been predicted as unsuccessful.
@@ -441,7 +598,7 @@ where
         let predicted = std::mem::take(&mut self.unsuccessful);
         tracing::debug!("requesting finalization status of withdrawals");
         let are_finalized =
-            get_finalized_withdrawals(&predicted, &self.zksync_contract, &self.l1_bridge).await?;
+            get_finalized_withdrawals(&predicted, &self.zksync_contract, self.l1_bridge(), &self.second_chains).await?;
 
         let mut already_finalized = vec![];
         let mut unsuccessful = vec![];
@@ -472,7 +629,7 @@ where
 
         // if the withdrawal has already been finalized set its
         // finalization transaction to zero which is signals exactly this
-        // it is known that withdrawal has been fianlized but not known
+        // it is known that withdrawal has been finalized but not known
         // in which exact transaction.
         //
         // this may happen in two cases:
@@ -492,27 +649,49 @@ where
     }
 }
 
-async fn get_finalized_withdrawals<M>(
+async fn get_finalized_withdrawals<M, T: Clone>(
     withdrawals: &[WithdrawalParams],
     zksync_contract: &IZkSync<M>,
     l1_bridge: &IL1Bridge<M>,
+    second_chains: &[SecondChainFinalizer<T, M>]
 ) -> Result<HashSet<WithdrawalKey>>
 where
-    M: Middleware,
+    M: Middleware + Clone,
 {
     let results: Result<Vec<_>> =
         futures::future::join_all(withdrawals.iter().map(|wd| async move {
             let l1_batch_number = U256::from(wd.l1_batch_number.as_u64());
             let l2_message_index = U256::from(wd.l2_message_index);
 
-            if is_eth(wd.sender) {
-                zksync_contract
-                    .is_eth_withdrawal_finalized(l1_batch_number, l2_message_index)
-                    .call()
-                    .await
-                    .map_err(|e| e.into())
+            let bridge = if let Some(false) = wd.is_primary_chain {
+                &second_chains
+                    .iter()
+                    .find(|chain| chain.gateway_address == wd.to_address)
+                    .unwrap()
+                    .l1_bridge
             } else {
                 l1_bridge
+            };
+            if is_eth(wd.sender) {
+                if let Some(false) = wd.is_primary_chain {
+                    second_chains
+                        .iter()
+                        .find(|chain| chain.gateway_address == wd.to_address)
+                        .unwrap()
+                        .zklink_contract
+                        .is_eth_withdrawal_finalized(l1_batch_number, l2_message_index)
+                        .call()
+                        .await
+                        .map_err(|e| e.into())
+                } else {
+                    zksync_contract
+                        .is_eth_withdrawal_finalized(l1_batch_number, l2_message_index)
+                        .call()
+                        .await
+                        .map_err(|e| e.into())
+                }
+            } else {
+                bridge
                     .is_withdrawal_finalized(l1_batch_number, l2_message_index)
                     .call()
                     .await
@@ -548,16 +727,17 @@ async fn request_finalize_params<M2>(
     pgpool: &PgPool,
     middleware: M2,
     hash_and_indices: &[(H256, u16, u64)],
+    gate_way_addrs: &[Address]
 ) -> Vec<WithdrawalParams>
 where
     M2: ZksyncMiddleware,
 {
     let mut ok_results = Vec::with_capacity(hash_and_indices.len());
 
-    // Run all parametere fetching in parallel.
+    // Run all parameter fetching in parallel.
     // Filter out errors and log them and increment a metric counter.
     // Return successful fetches.
-    for (i, result) in futures::future::join_all(hash_and_indices.iter().map(|(h, i, id)| {
+    let res:Vec<Result<WithdrawalParams>> = futures::future::join_all(hash_and_indices.iter().map(|(h, i, id)| {
         middleware
             .finalize_withdrawal_params(*h, *i as usize)
             .map_ok(|r| {
@@ -567,12 +747,21 @@ where
             })
             .map_err(crate::Error::from)
     }))
-    .await
-    .into_iter()
-    .enumerate()
-    {
+        .await;
+    for (i, result) in res.into_iter().enumerate() {
         match result {
-            Ok(r) => ok_results.push(r),
+            Ok(r) => {
+                if gate_way_addrs.contains(&r.to_address) {
+                    let mut primary_withdraw_params = r.clone();
+                    primary_withdraw_params.is_primary_chain = Some(true);
+                    ok_results.push(primary_withdraw_params);
+                    let mut second_withdraw_params = r;
+                    second_withdraw_params.is_primary_chain = Some(false);
+                    ok_results.push(second_withdraw_params);
+                } else {
+                    ok_results.push(r);
+                }
+            },
             Err(e) => {
                 FINALIZER_METRICS.failed_to_fetch_withdrawal_params.inc();
                 if let Error::Client(client::Error::WithdrawalLogNotFound(index, tx_hash)) = e {
@@ -594,18 +783,20 @@ where
 // Continiously query the new withdrawals that have been seen by watcher
 // request finalizing params for them and store this information into
 // finalizer db table.
-async fn params_fetcher_loop<M1, M2>(
+async fn params_fetcher_loop<M1, M2, T>(
     pool: PgPool,
     middleware: M2,
     zksync_contract: IZkSync<M1>,
     l1_bridge: IL1Bridge<M1>,
+    second_chains: Vec<SecondChainFinalizer<T, M1>>,
 ) where
-    M1: Middleware,
+    T: Clone,
+    M1: Middleware + Clone,
     M2: ZksyncMiddleware,
 {
     loop {
         if let Err(e) =
-            params_fetcher_loop_iteration(&pool, &middleware, &zksync_contract, &l1_bridge).await
+            params_fetcher_loop_iteration(&pool, &middleware, &zksync_contract, &l1_bridge, &second_chains).await
         {
             tracing::error!("params fetcher iteration ended with {e}");
             tokio::time::sleep(LOOP_ITERATION_ERROR_BACKOFF).await;
@@ -613,14 +804,15 @@ async fn params_fetcher_loop<M1, M2>(
     }
 }
 
-async fn params_fetcher_loop_iteration<M1, M2>(
+async fn params_fetcher_loop_iteration<T: Clone, M1, M2>(
     pool: &PgPool,
     middleware: &M2,
     zksync_contract: &IZkSync<M1>,
     l1_bridge: &IL1Bridge<M1>,
+    second_chains: &[SecondChainFinalizer<T, M1>],
 ) -> Result<()>
 where
-    M1: Middleware,
+    M1: Middleware + Clone,
     M2: ZksyncMiddleware,
 {
     let newly_executed_withdrawals = storage::get_withdrawals_with_no_data(pool, 1000).await?;
@@ -637,14 +829,18 @@ where
         .map(|p| (p.key.tx_hash, p.key.event_index_in_tx as u16, p.id))
         .collect();
 
-    let params = request_finalize_params(pool, &middleware, &hash_and_index_and_id).await;
+    let gate_way_addrs = second_chains
+        .iter()
+        .map(|chain| chain.gateway_address)
+        .collect::<Vec<_>>();
+    let params = request_finalize_params(pool, &middleware, &hash_and_index_and_id, &gate_way_addrs).await;
 
-    let already_finalized: Vec<_> = get_finalized_withdrawals(&params, zksync_contract, l1_bridge)
+    let already_finalized: Vec<_> = get_finalized_withdrawals(&params, zksync_contract, l1_bridge, second_chains)
         .await?
         .into_iter()
         .collect();
 
-    storage::add_withdrawals_data(pool, &params).await?;
+    storage::add_finalization_data(pool, &params).await?;
     storage::finalization_data_set_finalized_in_tx(pool, &already_finalized, H256::zero()).await?;
 
     Ok(())

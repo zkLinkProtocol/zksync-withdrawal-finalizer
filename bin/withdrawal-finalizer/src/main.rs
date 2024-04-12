@@ -25,6 +25,8 @@ use client::{l1bridge::codegen::IL1Bridge, zksync_contract::codegen::IZkSync, Zk
 use config::Config;
 use tokio::sync::watch;
 use vise_exporter::MetricsExporter;
+use client::withdrawal_finalizer::codegen::WithdrawalFinalizer;
+use client::zklink_contract::codegen::ZkLink;
 use watcher::Watcher;
 
 use crate::metrics::MAIN_FINALIZER_METRICS;
@@ -171,7 +173,6 @@ async fn main() -> Result<()> {
 
     let client_l2 = Arc::new(provider_l2);
 
-    let event_mux = BlockEvents::new(config.eth_client_ws_url.as_ref());
     let (blocks_tx, blocks_rx) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
 
     let blocks_tx_wrapped = tokio_util::sync::PollSender::new(blocks_tx.clone());
@@ -219,6 +220,16 @@ async fn main() -> Result<()> {
         tokens.extend_from_slice(custom_tokens.0.as_slice());
     }
 
+    // l1 events(contains l2 commit prove execute, parse l1 log contains withdraw)
+    let event_mux = BlockEvents::new(config.eth_client_ws_url.as_ref());
+    let block_events_handle = tokio::spawn(event_mux.run_with_reconnects(
+        config.diamond_proxy_addr,
+        config.l2_erc20_bridge_addr,
+        from_l1_block,
+        blocks_tx_wrapped,
+    ));
+
+    // l2 events(ContractDeployed, BridgeBurn, Withdrawal)
     let l2_events = L2EventsListener::new(
         config.api_web3_json_rpc_ws_url.as_str(),
         config
@@ -228,30 +239,17 @@ async fn main() -> Result<()> {
         tokens.into_iter().collect(),
         config.finalize_eth_token.unwrap_or(true),
     );
-
-    let l1_bridge = IL1Bridge::new(config.l1_erc20_bridge_proxy_addr, client_l1.clone());
-
-    let zksync_contract = IZkSync::new(config.diamond_proxy_addr, client_l1.clone());
-
-    // by default meter withdrawals
-    let meter_withdrawals = config.enable_withdrawal_metering.unwrap_or(true);
-
-    let watcher = Watcher::new(client_l2.clone(), pgpool.clone(), meter_withdrawals);
-
     let withdrawal_events_handle = tokio::spawn(l2_events.run_with_reconnects(
         from_l2_block,
         last_token_seen_at_block,
         we_tx_wrapped,
     ));
 
+    // Watcher(receive l1 and l2 event)
+    // by default meter withdrawals
+    let meter_withdrawals = config.enable_withdrawal_metering.unwrap_or(true);
+    let watcher = Watcher::new(client_l2.clone(), pgpool.clone(), meter_withdrawals);
     let watcher_handle = tokio::spawn(watcher.run(blocks_rx, we_rx, from_l2_block));
-
-    let block_events_handle = tokio::spawn(event_mux.run_with_reconnects(
-        config.diamond_proxy_addr,
-        config.l2_erc20_bridge_addr,
-        from_l1_block,
-        blocks_tx_wrapped,
-    ));
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
@@ -267,18 +265,15 @@ async fn main() -> Result<()> {
     });
 
     let wallet = config.account_private_key.parse::<LocalWallet>()?;
-
     let client_l1_with_signer = Arc::new(
-        SignerMiddleware::new_with_provider_chain(client_l1, wallet)
+        SignerMiddleware::new_with_provider_chain(client_l1.clone(), wallet.clone())
             .await
-            .unwrap(),
+            .unwrap()
     );
-
     let finalizer_account_address = client_l1_with_signer.address();
-
-    let contract = client::withdrawal_finalizer::codegen::WithdrawalFinalizer::new(
+    let contract = WithdrawalFinalizer::new(
         config.withdrawal_finalizer_addr,
-        client_l1_with_signer,
+        client_l1_with_signer.clone(),
     );
     let batch_finalization_gas_limit = U256::from_dec_str(&config.batch_finalization_gas_limit)?;
     let one_withdrawal_gas_limit = U256::from_dec_str(&config.one_withdrawal_gas_limit)?;
@@ -295,18 +290,49 @@ async fn main() -> Result<()> {
         }
         None => None,
     };
+    let l1_bridge = IL1Bridge::new(config.l1_erc20_bridge_proxy_addr, client_l1.clone());
+    let zksync_contract = IZkSync::new(config.diamond_proxy_addr, client_l1.clone());
+
+    let mut second_chain_main_contract = Vec::new();
+    for ((
+        ((&gateway_address, zklink_contract), finalizer_contract),
+        l1_erc20_bridge_proxy), sencond_chain_web3_url
+    ) in config.second_chain_gateway_addrs
+        .iter()
+        .zip(config.second_chain_diamond_proxy_addrs.iter())
+        .zip(config.second_chain_withdrawal_finalizer_addrs.iter())
+        .zip(config.second_chain_l1_erc20_bridge_proxy_addrs.iter())
+        .zip(config.secondary_chain_client_http_url.iter())
+    {
+        let provider_l1 = Provider::<Http>::try_from(sencond_chain_web3_url.as_ref()).unwrap();
+        let client_l1 = Arc::new(provider_l1);
+        let client_l1_with_signer = Arc::new(
+            SignerMiddleware::new_with_provider_chain(client_l1.clone(), wallet.clone())
+                .await
+                .unwrap(),
+        );
+        second_chain_main_contract.push(finalizer::SecondChainFinalizer {
+            finalizer_contract: WithdrawalFinalizer::new(*finalizer_contract, client_l1_with_signer.clone()),
+            zklink_contract: ZkLink::new(*zklink_contract, client_l1.clone()),
+            l1_bridge: IL1Bridge::new(*l1_erc20_bridge_proxy, client_l1.clone()),
+            gateway_address,
+        })
+    }
+
     let finalizer = finalizer::Finalizer::new(
         pgpool.clone(),
         one_withdrawal_gas_limit,
         batch_finalization_gas_limit,
         contract,
         zksync_contract,
+        second_chain_main_contract,
         l1_bridge,
         config.tx_retry_timeout,
         finalizer_account_address,
         config.tokens_to_finalize.unwrap_or_default(),
         meter_withdrawals,
         eth_finalization_threshold,
+        config.finalize_withdraw_target.unwrap_or_default()
     );
     let finalizer_handle = tokio::spawn(finalizer.run(client_l2));
 

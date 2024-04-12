@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use envconfig::Envconfig;
 use ethers::types::Address;
-use finalizer::{AddrList, TokenList};
+use finalizer::{AddrList, FinalizeWithdrawTarget, TokenList, UrlList};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -21,6 +21,10 @@ pub struct Config {
     #[envconfig(from = "ETH_CLIENT_HTTP_URL")]
     pub eth_client_http_url: Url,
 
+    /// L1 secondary chain HTTP url.
+    #[envconfig(from = "SECOND_CHAIN_CLIENT_HTTP_URL")]
+    pub secondary_chain_client_http_url: UrlList,
+
     /// Address of the `L1Bridge` contract.
     #[envconfig(from = "CONTRACTS_L1_ERC20_BRIDGE_PROXY_ADDR")]
     pub l1_erc20_bridge_proxy_addr: Address,
@@ -29,13 +33,29 @@ pub struct Config {
     #[envconfig(from = "CONTRACTS_L2_ERC20_BRIDGE_ADDR")]
     pub l2_erc20_bridge_addr: Address,
 
-    /// Main contract
+    /// Primary chain Main contract
     #[envconfig(from = "CONTRACTS_DIAMOND_PROXY_ADDR")]
     pub diamond_proxy_addr: Address,
 
-    /// Finalizer contract
+    /// Primary chain Finalizer contract
     #[envconfig(from = "CONTRACTS_WITHDRAWAL_FINALIZER_CONTRACT")]
     pub withdrawal_finalizer_addr: Address,
+
+    /// Address of the `L1Bridge` contract in second chain.
+    #[envconfig(from = "CONTRACTS_SECOND_CHAIN_L1_ERC20_BRIDGE_PROXY_ADDRS")]
+    pub second_chain_l1_erc20_bridge_proxy_addrs: AddrList,
+
+    /// Second chain main contract
+    #[envconfig(from = "CONTRACTS_SECOND_CHAIN_DIAMOND_PROXY_ADDRS")]
+    pub second_chain_diamond_proxy_addrs: AddrList,
+
+    /// Second chain finalizer contract
+    #[envconfig(from = "CONTRACTS_SECOND_CHAIN_WITHDRAWAL_FINALIZER_CONTRACTS")]
+    pub second_chain_withdrawal_finalizer_addrs: AddrList,
+
+    /// Second chain gateway addresses
+    #[envconfig(from = "SECOND_CHAIN_GATEWAY_ADDRS")]
+    pub second_chain_gateway_addrs: AddrList,
 
     /// L2 WS Endpoint
     #[envconfig(from = "API_WEB3_JSON_RPC_WS_URL")]
@@ -65,6 +85,9 @@ pub struct Config {
 
     #[envconfig(from = "TX_RETRY_TIMEOUT_SECS")]
     pub tx_retry_timeout: usize,
+
+    #[envconfig(from = "FINALIZE_WITHDRAW_TARGET")]
+    pub finalize_withdraw_target: Option<FinalizeWithdrawTarget>,
 
     #[envconfig(from = "TOKENS_TO_FINALIZE")]
     pub tokens_to_finalize: Option<TokenList>,

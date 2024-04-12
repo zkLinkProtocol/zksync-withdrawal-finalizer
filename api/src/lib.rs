@@ -11,7 +11,7 @@ use tower_http::cors::CorsLayer;
 struct WithdrawalRequest {
     pub limit: u64,
 }
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 struct WithdrawalResponse {
     pub tx_hash: H256,
     pub token: Address,
@@ -62,4 +62,25 @@ async fn get_withdrawals(
         .map(WithdrawalResponse::from)
         .collect();
     Ok(Json(result))
+}
+
+#[tokio::test]
+async fn test_get_withdrawals() {
+    let from_address = "0xe269B18099A71599994312757fEf8DEBE7518C31";
+    let limit = 10;
+
+    let url = format!("http://localhost:3000/withdrawals/{}?limit={}", from_address, limit);
+
+    let client = reqwest::Client::new();
+    let response = client.get(url)
+        .send()
+        .await
+        .unwrap();
+
+    if response.status().is_success() {
+        let withdrawals: Vec<WithdrawalResponse> = response.json().await.unwrap();
+        println!("Withdrawals: {:?}", withdrawals);
+    } else {
+        println!("Failed to get withdrawals. Status code: {}", response.status());
+    }
 }

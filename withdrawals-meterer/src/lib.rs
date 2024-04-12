@@ -18,6 +18,7 @@ mod metrics;
 pub use metrics::MeteringComponent;
 
 /// State of withdrawals volumes metering.
+#[derive(Clone)]
 pub struct WithdrawalsMeter {
     pool: PgPool,
     /// A mapping from L2 address to L1 address and decimals of token.

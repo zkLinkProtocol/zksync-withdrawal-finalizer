@@ -176,6 +176,19 @@
       "inputs": [
         {
           "indexed": false,
+          "internalType": "contract IL2Gateway",
+          "name": "gateway",
+          "type": "address"
+        }
+      ],
+      "name": "InitGateway",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
           "internalType": "bool",
           "name": "isPorterAvailable",
           "type": "bool"
@@ -201,6 +214,89 @@
         }
       ],
       "name": "NewAdmin",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "enum PubdataPricingMode",
+              "name": "pubdataPricingMode",
+              "type": "uint8"
+            },
+            {
+              "internalType": "uint32",
+              "name": "batchOverheadL1Gas",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint32",
+              "name": "maxPubdataPerBatch",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint32",
+              "name": "maxL2GasPerBatch",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint32",
+              "name": "priorityTxMaxPubdata",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint64",
+              "name": "minimalL2GasPrice",
+              "type": "uint64"
+            }
+          ],
+          "indexed": false,
+          "internalType": "struct FeeParams",
+          "name": "oldFeeParams",
+          "type": "tuple"
+        },
+        {
+          "components": [
+            {
+              "internalType": "enum PubdataPricingMode",
+              "name": "pubdataPricingMode",
+              "type": "uint8"
+            },
+            {
+              "internalType": "uint32",
+              "name": "batchOverheadL1Gas",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint32",
+              "name": "maxPubdataPerBatch",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint32",
+              "name": "maxL2GasPerBatch",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint32",
+              "name": "priorityTxMaxPubdata",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint64",
+              "name": "minimalL2GasPrice",
+              "type": "uint64"
+            }
+          ],
+          "indexed": false,
+          "internalType": "struct FeeParams",
+          "name": "newFeeParams",
+          "type": "tuple"
+        }
+      ],
+      "name": "NewFeeParams",
       "type": "event"
     },
     {
@@ -400,6 +496,94 @@
     },
     {
       "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "gateway",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "isActive",
+          "type": "bool"
+        }
+      ],
+      "name": "SecondaryChainStatusUpdate",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "secondaryChainGateway",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "batchNumber",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "forwardEthAmount",
+          "type": "uint256"
+        }
+      ],
+      "name": "SyncBatchRoot",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "secondaryChainGateway",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "totalSyncedPriorityTxs",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "syncHash",
+          "type": "bytes32"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "forwardEthAmount",
+          "type": "uint256"
+        }
+      ],
+      "name": "SyncL2Requests",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "l2TxHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "SyncL2TxHash",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
       "inputs": [],
       "name": "Unfreeze",
       "type": "event"
@@ -433,6 +617,51 @@
     {
       "inputs": [],
       "name": "acceptGovernor",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "enum PubdataPricingMode",
+              "name": "pubdataPricingMode",
+              "type": "uint8"
+            },
+            {
+              "internalType": "uint32",
+              "name": "batchOverheadL1Gas",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint32",
+              "name": "maxPubdataPerBatch",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint32",
+              "name": "maxL2GasPerBatch",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint32",
+              "name": "priorityTxMaxPubdata",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint64",
+              "name": "minimalL2GasPrice",
+              "type": "uint64"
+            }
+          ],
+          "internalType": "struct FeeParams",
+          "name": "_newFeeParams",
+          "type": "tuple"
+        }
+      ],
+      "name": "changeFeeParams",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -766,10 +995,105 @@
       "type": "function"
     },
     {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "gateway",
+              "type": "address"
+            },
+            {
+              "internalType": "bool",
+              "name": "isContractCall",
+              "type": "bool"
+            },
+            {
+              "internalType": "address",
+              "name": "sender",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "txId",
+              "type": "uint256"
+            },
+            {
+              "internalType": "address",
+              "name": "contractAddressL2",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "l2Value",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes",
+              "name": "l2CallData",
+              "type": "bytes"
+            },
+            {
+              "internalType": "uint256",
+              "name": "l2GasLimit",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "l2GasPricePerPubdata",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes[]",
+              "name": "factoryDeps",
+              "type": "bytes[]"
+            },
+            {
+              "internalType": "address",
+              "name": "refundRecipient",
+              "type": "address"
+            }
+          ],
+          "internalType": "struct IMailbox.ForwardL2Request",
+          "name": "_request",
+          "type": "tuple"
+        }
+      ],
+      "name": "forwardRequestL2Transaction",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "canonicalTxHash",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "payable",
+      "type": "function"
+    },
+    {
       "inputs": [],
       "name": "freezeDiamond",
       "outputs": [],
       "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "secondaryChainCanonicalTxHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "getCanonicalTxHash",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "view",
       "type": "function"
     },
     {
@@ -780,6 +1104,19 @@
           "internalType": "uint256",
           "name": "",
           "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getGateway",
+      "outputs": [
+        {
+          "internalType": "contract IL2Gateway",
+          "name": "",
+          "type": "address"
         }
       ],
       "stateMutability": "view",
@@ -916,6 +1253,119 @@
       "type": "function"
     },
     {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "gateway",
+          "type": "address"
+        }
+      ],
+      "name": "getSecondaryChain",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "bool",
+              "name": "valid",
+              "type": "bool"
+            },
+            {
+              "internalType": "uint256",
+              "name": "totalPriorityTxs",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "totalSyncedPriorityTxs",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "totalPendingWithdraw",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct SecondaryChain",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "canonicalTxHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "getSecondaryChainOp",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "gateway",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "priorityOpId",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "canonicalTxHash",
+              "type": "bytes32"
+            }
+          ],
+          "internalType": "struct SecondaryChainOp",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "gateway",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "priorityOpId",
+          "type": "uint256"
+        }
+      ],
+      "name": "getSecondaryChainSyncStatus",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "bytes32",
+              "name": "hash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint256",
+              "name": "amount",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct SecondaryChainSyncStatus",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
       "inputs": [],
       "name": "getTotalBatchesCommitted",
       "outputs": [
@@ -1005,6 +1455,67 @@
           "internalType": "struct VerifierParams",
           "name": "",
           "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint64",
+              "name": "batchNumber",
+              "type": "uint64"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "batchHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint64",
+              "name": "indexRepeatedStorageChanges",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint256",
+              "name": "numberOfLayer1Txs",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "priorityOperationsHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "l2LogsTreeRoot",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint256",
+              "name": "timestamp",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "commitment",
+              "type": "bytes32"
+            }
+          ],
+          "internalType": "struct IExecutor.StoredBatchInfo[]",
+          "name": "_batchesData",
+          "type": "tuple[]"
+        }
+      ],
+      "name": "isBatchesSynced",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
         }
       ],
       "stateMutability": "view",
@@ -1116,7 +1627,7 @@
       "outputs": [
         {
           "internalType": "bytes32",
-          "name": "hash",
+          "name": "merkleRoot",
           "type": "bytes32"
         }
       ],
@@ -1527,6 +2038,19 @@
     {
       "inputs": [
         {
+          "internalType": "contract IL2Gateway",
+          "name": "_gateway",
+          "type": "address"
+        }
+      ],
+      "name": "setGateway",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "address",
           "name": "_newPendingAdmin",
           "type": "address"
@@ -1580,6 +2104,24 @@
       "inputs": [
         {
           "internalType": "address",
+          "name": "_gateway",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "_active",
+          "type": "bool"
+        }
+      ],
+      "name": "setSecondaryChainGateway",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
           "name": "_validator",
           "type": "address"
         },
@@ -1611,6 +2153,70 @@
         }
       ],
       "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_secondaryChainGateway",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_batchNumber",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_forwardEthAmount",
+          "type": "uint256"
+        }
+      ],
+      "name": "syncBatchRoot",
+      "outputs": [],
+      "stateMutability": "payable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_secondaryChainGateway",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_newTotalSyncedPriorityTxs",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "_syncHash",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_forwardEthAmount",
+          "type": "uint256"
+        }
+      ],
+      "name": "syncL2Requests",
+      "outputs": [],
+      "stateMutability": "payable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "_l2TxHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "syncL2TxHash",
+      "outputs": [],
+      "stateMutability": "payable",
       "type": "function"
     },
     {
