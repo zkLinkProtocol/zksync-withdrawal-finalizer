@@ -22,7 +22,7 @@ pub struct Config {
     pub eth_client_http_url: Url,
 
     /// L1 secondary chain HTTP url.
-    #[envconfig(from = "SECOND_CHAIN_CLIENT_HTTP_URL")]
+    #[envconfig(from = "SECOND_CHAIN_CLIENT_HTTP_URL", default = "[]")]
     pub secondary_chain_client_http_url: UrlList,
 
     /// Address of the `L1Bridge` contract.
@@ -42,20 +42,20 @@ pub struct Config {
     pub withdrawal_finalizer_addr: Address,
 
     /// Address of the `L1Bridge` contract in second chain.
-    #[envconfig(from = "CONTRACTS_SECOND_CHAIN_L1_ERC20_BRIDGE_PROXY_ADDRS")]
+    #[envconfig(from = "CONTRACTS_SECOND_CHAIN_L1_ERC20_BRIDGE_PROXY_ADDRS", default = "[]")]
     pub second_chain_l1_erc20_bridge_proxy_addrs: AddrList,
 
     /// Second chain main contract
-    #[envconfig(from = "CONTRACTS_SECOND_CHAIN_DIAMOND_PROXY_ADDRS")]
+    #[envconfig(from = "CONTRACTS_SECOND_CHAIN_DIAMOND_PROXY_ADDRS", default = "[]")]
     pub second_chain_diamond_proxy_addrs: AddrList,
 
     /// Second chain finalizer contract
-    #[envconfig(from = "CONTRACTS_SECOND_CHAIN_WITHDRAWAL_FINALIZER_CONTRACTS")]
+    #[envconfig(from = "CONTRACTS_SECOND_CHAIN_WITHDRAWAL_FINALIZER_CONTRACTS", default = "[]")]
     pub second_chain_withdrawal_finalizer_addrs: AddrList,
 
-    /// Second chain gateway addresses
-    #[envconfig(from = "SECOND_CHAIN_GATEWAY_ADDRS")]
-    pub second_chain_gateway_addrs: AddrList,
+    /// Second chain gateway addresses in primary chain
+    #[envconfig(from = "SECOND_CHAIN_GATEWAY_ADDRS_IN_PRIMARY_CHAIN")]
+    pub second_chain_gateway_addrs_in_primary_chain: AddrList,
 
     /// L2 WS Endpoint
     #[envconfig(from = "API_WEB3_JSON_RPC_WS_URL")]

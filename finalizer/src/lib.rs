@@ -101,7 +101,7 @@ impl FromStr for TokenList {
 }
 
 /// A newtype that represents a set of addresses in JSON format.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct AddrList(pub Vec<Address>);
 
 impl Deref for AddrList {
@@ -121,7 +121,7 @@ impl FromStr for AddrList {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct UrlList(pub Vec<Url>);
 
 impl Deref for UrlList {
@@ -235,11 +235,13 @@ where
 
     pub fn finalizer_contract(&self) -> &WithdrawalFinalizer<S> {
         if let Some(address) = self.selected_gate_way_address {
-            &self.second_chains
+            self.second_chains
                 .iter()
-                .find(|chain| chain.gateway_address == address)
-                .unwrap()
+                .find(|chain| chain.gateway_addr_in_primary_chain == address)
+                .expect("The gateway address of the secondary chain is not found, please check the configuration.")
                 .finalizer_contract
+                .as_ref()
+                .expect("The finalizer_contract of secondary chain is not configured.")
         } else {
             &self.finalizer_contract
         }
@@ -247,11 +249,13 @@ where
 
     pub fn l1_bridge(&self) -> &IL1Bridge<M> {
         if let Some(address) = self.selected_gate_way_address {
-            &self.second_chains
+            self.second_chains
                 .iter()
-                .find(|chain| chain.gateway_address == address)
-                .unwrap()
+                .find(|chain| chain.gateway_addr_in_primary_chain == address)
+                .expect("The gateway address of the secondary chain is not found, please check the configuration.")
                 .l1_bridge
+                .as_ref()
+                .expect("The l1_bridge of secondary chain is not configured.")
         } else {
             &self.l1_bridge
         }
@@ -261,9 +265,11 @@ where
         if let Some(address) = self.selected_gate_way_address {
             self.second_chains
                 .iter()
-                .find(|chain| chain.gateway_address == address)
-                .unwrap()
+                .find(|chain| chain.gateway_addr_in_primary_chain == address)
+                .expect("The gateway address of the secondary chain is not found, please check the configuration.")
                 .zklink_contract
+                .as_ref()
+                .expect("The zklink_contract of secondary chain is not configured.")
                 .get_total_batches_executed()
                 .await
         } else {
@@ -293,7 +299,7 @@ where
         if self.finalize_withdraw_target == All || self.finalize_withdraw_target == SecondaryChain {
             for chain in self.second_chains.iter() {
                 let mut finalizer = self.clone();
-                finalizer.selected_gate_way_address = Some(chain.gateway_address);
+                finalizer.selected_gate_way_address = Some(chain.gateway_addr_in_primary_chain);
                 finalizer_handles.push(tokio::spawn(finalizer.finalizer_loop()));
             }
         }
@@ -576,7 +582,7 @@ where
     }
 
     fn which_chain_tx(&self, target: &Address) -> FinalizeWithdrawChain {
-        if self.second_chains.iter().any(|c| &c.gateway_address == target) {
+        if self.second_chains.iter().any(|c| &c.gateway_addr_in_primary_chain == target) {
             FinalizeWithdrawChain::SecondaryChain
         } else {
             FinalizeWithdrawChain::PrimaryChain
@@ -663,35 +669,35 @@ where
             let l1_batch_number = U256::from(wd.l1_batch_number.as_u64());
             let l2_message_index = U256::from(wd.l2_message_index);
 
-            let bridge = if let Some(false) = wd.is_primary_chain {
-                &second_chains
-                    .iter()
-                    .find(|chain| chain.gateway_address == wd.to_address)
-                    .unwrap()
-                    .l1_bridge
-            } else {
-                l1_bridge
-            };
             if is_eth(wd.sender) {
                 if let Some(false) = wd.is_primary_chain {
                     second_chains
                         .iter()
-                        .find(|chain| chain.gateway_address == wd.to_address)
+                        .find(|chain| chain.gateway_addr_in_primary_chain == wd.to_address)
                         .unwrap()
                         .zklink_contract
+                        .as_ref()
+                        .expect("The zklink_contract of secondary chain is not configured.")
                         .is_eth_withdrawal_finalized(l1_batch_number, l2_message_index)
-                        .call()
-                        .await
-                        .map_err(|e| e.into())
                 } else {
                     zksync_contract
                         .is_eth_withdrawal_finalized(l1_batch_number, l2_message_index)
-                        .call()
-                        .await
-                        .map_err(|e| e.into())
                 }
+                    .call()
+                    .await
+                    .map_err(|e| e.into())
             } else {
-                bridge
+                if let Some(false) = wd.is_primary_chain {
+                    second_chains
+                        .iter()
+                        .find(|chain| chain.gateway_addr_in_primary_chain == wd.to_address)
+                        .unwrap()
+                        .l1_bridge
+                        .as_ref()
+                        .expect("The l1_bridge of secondary chain is not configured.")
+                } else {
+                    l1_bridge
+                }
                     .is_withdrawal_finalized(l1_batch_number, l2_message_index)
                     .call()
                     .await
@@ -831,7 +837,7 @@ where
 
     let gate_way_addrs = second_chains
         .iter()
-        .map(|chain| chain.gateway_address)
+        .map(|chain| chain.gateway_addr_in_primary_chain)
         .collect::<Vec<_>>();
     let params = request_finalize_params(pool, &middleware, &hash_and_index_and_id, &gate_way_addrs).await;
 

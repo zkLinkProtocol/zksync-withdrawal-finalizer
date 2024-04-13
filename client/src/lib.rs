@@ -165,7 +165,11 @@ pub struct WithdrawalParams {
     /// Proof
     pub proof: Vec<[u8; 32]>,
 
-    /// is primary chain
+    /// Default None, user withdraw from l2 to l1(primary chain):
+    ///     withdraw user assert from primary chain gateway to user addr in primary chain
+    /// Other, user withdraw from l2 to other l1(secondary chain):
+    ///     True => First, finalize withdraw(user assert from primary chain gateway to secondary chain gateway) in primary chain
+    ///     False => Then, finalize withdraw(user assert from secondary chain gateway to user addr) in secondary chain
     pub is_primary_chain: Option<bool>,
 
     /// withdraw to l1 target address
