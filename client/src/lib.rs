@@ -401,7 +401,7 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
 
                 let l1_receiver = withdrawal_initiated_event.l_1_receiver;
 
-                (get_l1_bridge_burn_message_keccak(b.amount, l1_receiver, l1_address)?, Default::default())
+                (get_l1_bridge_burn_message_keccak(b.amount, l1_receiver, l1_address)?, Address::default())
             }
             WithdrawalEvents::Withdrawal(w) => (get_l1_withdraw_message_keccak(&w)?, w.l_1_receiver),
             WithdrawalEvents::WithdrawalWithMessage(w) => (get_l1_withdraw_with_message_keccak(&w)?, w.l_1_receiver)

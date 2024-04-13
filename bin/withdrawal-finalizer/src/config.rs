@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use envconfig::Envconfig;
 use ethers::types::Address;
-use finalizer::{AddrList, FinalizeWithdrawTarget, TokenList, UrlList};
+use finalizer::{AddrList, FinalizeWithdrawChain, TokenList, UrlList};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -86,8 +86,8 @@ pub struct Config {
     #[envconfig(from = "TX_RETRY_TIMEOUT_SECS")]
     pub tx_retry_timeout: usize,
 
-    #[envconfig(from = "FINALIZE_WITHDRAW_TARGET")]
-    pub finalize_withdraw_target: Option<FinalizeWithdrawTarget>,
+    #[envconfig(from = "FINALIZE_WITHDRAW_CHAIN")]
+    pub finalize_withdraw_chain: Option<FinalizeWithdrawChain>,
 
     #[envconfig(from = "TOKENS_TO_FINALIZE")]
     pub tokens_to_finalize: Option<TokenList>,

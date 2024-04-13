@@ -332,7 +332,7 @@ async fn main() -> Result<()> {
         config.tokens_to_finalize.unwrap_or_default(),
         meter_withdrawals,
         eth_finalization_threshold,
-        config.finalize_withdraw_target.unwrap_or_default()
+        config.finalize_withdraw_chain.unwrap_or_default()
     );
     let finalizer_handle = tokio::spawn(finalizer.run(client_l2));
 

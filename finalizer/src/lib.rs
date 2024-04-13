@@ -52,13 +52,13 @@ const LOOP_ITERATION_ERROR_BACKOFF: Duration = Duration::from_secs(5);
 /// An `enum` that defines target that Finalizer finalizes.
 #[allow(missing_docs)]
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
-pub enum FinalizeWithdrawTarget {
+pub enum FinalizeWithdrawChain {
     All,
     PrimaryChain,
-    SecondChain,
+    SecondaryChain,
 }
 
-impl FromStr for FinalizeWithdrawTarget {
+impl FromStr for FinalizeWithdrawChain {
     type Err = serde_json::Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
@@ -66,7 +66,7 @@ impl FromStr for FinalizeWithdrawTarget {
     }
 }
 
-impl Default for FinalizeWithdrawTarget {
+impl Default for FinalizeWithdrawChain {
     fn default() -> Self {
         Self::All
     }
@@ -168,7 +168,7 @@ pub struct Finalizer<M1, M2> where
     second_chains: Vec<SecondChainFinalizer<M1, M2>>,
 
     eth_threshold: Option<U256>,
-    finalize_withdraw_target: FinalizeWithdrawTarget
+    finalize_withdraw_target: FinalizeWithdrawChain
 }
 
 const NO_NEW_WITHDRAWALS_BACKOFF: Duration = Duration::from_secs(5);
@@ -200,7 +200,7 @@ where
         token_list: TokenList,
         meter_withdrawals: bool,
         eth_threshold: Option<U256>,
-        finalize_withdraw_target: FinalizeWithdrawTarget,
+        finalize_withdraw_target: FinalizeWithdrawChain,
     ) -> Self {
         let withdrawals_meterer = meter_withdrawals.then_some(WithdrawalsMeter::new(
             pgpool.clone(),
@@ -288,9 +288,9 @@ where
             self.second_chains.clone(),
         ));
 
-        use FinalizeWithdrawTarget::*;
+        use FinalizeWithdrawChain::*;
         let mut finalizer_handles = Vec::new();
-        if self.finalize_withdraw_target == All || self.finalize_withdraw_target == SecondChain {
+        if self.finalize_withdraw_target == All || self.finalize_withdraw_target == SecondaryChain {
             for chain in self.second_chains.iter() {
                 let mut finalizer = self.clone();
                 finalizer.selected_gate_way_address = Some(chain.gateway_address);
@@ -575,11 +575,11 @@ where
         self.process_unsuccessful().await
     }
 
-    fn which_chain_tx(&self, target: &Address) -> FinalizeWithdrawTarget {
+    fn which_chain_tx(&self, target: &Address) -> FinalizeWithdrawChain {
         if self.second_chains.iter().any(|c| &c.gateway_address == target) {
-            FinalizeWithdrawTarget::SecondChain
+            FinalizeWithdrawChain::SecondaryChain
         } else {
-            FinalizeWithdrawTarget::PrimaryChain
+            FinalizeWithdrawChain::PrimaryChain
         }
     }
 
