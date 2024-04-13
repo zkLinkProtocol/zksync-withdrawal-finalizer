@@ -14,6 +14,7 @@ use ethers::{
     signers::LocalWallet,
     types::U256,
 };
+use ethers::signers::Signer;
 use eyre::{anyhow, Result};
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -27,6 +28,7 @@ use tokio::sync::watch;
 use vise_exporter::MetricsExporter;
 use client::withdrawal_finalizer::codegen::WithdrawalFinalizer;
 use client::zklink_contract::codegen::ZkLink;
+use finalizer::SecondChainFinalizer;
 use watcher::Watcher;
 
 use crate::metrics::MAIN_FINALIZER_METRICS;
@@ -234,6 +236,7 @@ async fn main() -> Result<()> {
         config.api_web3_json_rpc_ws_url.as_str(),
         config
             .custom_token_deployer_addresses
+            .clone()
             .map(|list| list.0)
             .unwrap_or(vec![config.l2_erc20_bridge_addr]),
         tokens.into_iter().collect(),
@@ -284,7 +287,7 @@ async fn main() -> Result<()> {
         config.batch_finalization_gas_limit,
     );
 
-    let eth_finalization_threshold = match config.eth_finalization_threshold {
+    let eth_finalization_threshold = match &config.eth_finalization_threshold {
         Some(eth_finalization_threshold) => {
             Some(ethers::utils::parse_ether(eth_finalization_threshold)?)
         }
@@ -293,31 +296,7 @@ async fn main() -> Result<()> {
     let l1_bridge = IL1Bridge::new(config.l1_erc20_bridge_proxy_addr, client_l1.clone());
     let zksync_contract = IZkSync::new(config.diamond_proxy_addr, client_l1.clone());
 
-    let mut second_chain_main_contract = Vec::new();
-    for ((
-        ((&gateway_address, zklink_contract), finalizer_contract),
-        l1_erc20_bridge_proxy), sencond_chain_web3_url
-    ) in config.second_chain_gateway_addrs
-        .iter()
-        .zip(config.second_chain_diamond_proxy_addrs.iter())
-        .zip(config.second_chain_withdrawal_finalizer_addrs.iter())
-        .zip(config.second_chain_l1_erc20_bridge_proxy_addrs.iter())
-        .zip(config.secondary_chain_client_http_url.iter())
-    {
-        let provider_l1 = Provider::<Http>::try_from(sencond_chain_web3_url.as_ref()).unwrap();
-        let client_l1 = Arc::new(provider_l1);
-        let client_l1_with_signer = Arc::new(
-            SignerMiddleware::new_with_provider_chain(client_l1.clone(), wallet.clone())
-                .await
-                .unwrap(),
-        );
-        second_chain_main_contract.push(finalizer::SecondChainFinalizer {
-            finalizer_contract: WithdrawalFinalizer::new(*finalizer_contract, client_l1_with_signer.clone()),
-            zklink_contract: ZkLink::new(*zklink_contract, client_l1.clone()),
-            l1_bridge: IL1Bridge::new(*l1_erc20_bridge_proxy, client_l1.clone()),
-            gateway_address,
-        })
-    }
+    let second_chains_contracts = generate_secondary_chains_from_config(&config, wallet).await;
 
     let finalizer = finalizer::Finalizer::new(
         pgpool.clone(),
@@ -325,14 +304,14 @@ async fn main() -> Result<()> {
         batch_finalization_gas_limit,
         contract,
         zksync_contract,
-        second_chain_main_contract,
+        second_chains_contracts,
         l1_bridge,
         config.tx_retry_timeout,
         finalizer_account_address,
         config.tokens_to_finalize.unwrap_or_default(),
         meter_withdrawals,
         eth_finalization_threshold,
-        config.finalize_withdraw_target.unwrap_or_default()
+        config.finalize_withdraw_chain.unwrap_or_default()
     );
     let finalizer_handle = tokio::spawn(finalizer.run(client_l2));
 
@@ -367,4 +346,51 @@ async fn main() -> Result<()> {
     stop_vise_exporter.send_replace(());
 
     Ok(())
+}
+
+/// Whether PrimaryChain or SecondaryChain withdrawals, gateway_addr_in_primary_chain must exist
+/// In case of PrimaryChain withdrawals, we allow finalizer_contract, zklink_contract, l1_bridge without configuration.
+/// In case of SecondaryChain withdrawals, we require finalizer_contract, zklink_contract, l1_bridge to be configured, otherwise the program will be panic immediately afterward.
+pub async fn generate_secondary_chains_from_config<S: Signer + Clone>(config: &Config, wallet: S)
+    -> Vec<SecondChainFinalizer<SignerMiddleware<Arc<Provider<Http>>, S>, Provider<Http>>> {
+    let mut second_chain_main_contract = Vec::new();
+
+    let mut second_chain_diamond_proxy_addrs = config.second_chain_diamond_proxy_addrs.iter();
+    let mut second_chain_withdrawal_finalizer_addrs = config.second_chain_withdrawal_finalizer_addrs.iter();
+    let mut second_chain_l1_erc20_bridge_proxy_addrs = config.second_chain_l1_erc20_bridge_proxy_addrs.iter();
+    let mut secondary_chain_client_http_url = config.secondary_chain_client_http_url.iter();
+    for &gateway_address in config.second_chain_gateway_addrs_in_primary_chain.iter() {
+        let (finalizer_contract, zklink_contract, l1_bridge) = if let (
+            Some(diamond_proxy_addr),
+            Some(withdrawal_finalizer_addr),
+            Some(l1_erc20_bridge_proxy_addr),
+            Some(client_http_url)
+        ) =  (
+            second_chain_diamond_proxy_addrs.next(),
+            second_chain_withdrawal_finalizer_addrs.next(),
+            second_chain_l1_erc20_bridge_proxy_addrs.next(),
+            secondary_chain_client_http_url.next()
+        ) {
+            let client_l1: Arc<Provider<Http>> = Arc::new(client_http_url.as_ref().try_into().unwrap());
+            let client_l1_with_signer = Arc::new(
+                SignerMiddleware::new_with_provider_chain(client_l1.clone(), wallet.clone())
+                    .await
+                    .unwrap(),
+            );
+            (
+                Some(WithdrawalFinalizer::new(*withdrawal_finalizer_addr, client_l1_with_signer.clone())),
+                Some(ZkLink::new(*diamond_proxy_addr, client_l1.clone())),
+                Some(IL1Bridge::new(*l1_erc20_bridge_proxy_addr, client_l1)),
+            )
+        } else {
+            (None, None, None)
+        };
+        second_chain_main_contract.push(SecondChainFinalizer {
+            finalizer_contract,
+            zklink_contract,
+            l1_bridge,
+            gateway_addr_in_primary_chain: gateway_address,
+        })
+    }
+    second_chain_main_contract
 }

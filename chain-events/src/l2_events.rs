@@ -39,6 +39,7 @@ enum L2Events {
     BridgeBurn(BridgeBurnFilter),
     Withdrawal(WithdrawalFilter),
     WithdrawalWithMessage(WithdrawalWithMessageFilter),
+    #[allow(dead_code)]
     ContractDeployed(ContractDeployedFilter),
 }
 

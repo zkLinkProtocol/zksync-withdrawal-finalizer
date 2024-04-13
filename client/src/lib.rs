@@ -165,7 +165,11 @@ pub struct WithdrawalParams {
     /// Proof
     pub proof: Vec<[u8; 32]>,
 
-    /// is primary chain
+    /// Default None, user withdraw from l2 to l1(primary chain):
+    ///     withdraw user assert from primary chain gateway to user addr in primary chain
+    /// Other, user withdraw from l2 to other l1(secondary chain):
+    ///     True => First, finalize withdraw(user assert from primary chain gateway to secondary chain gateway) in primary chain
+    ///     False => Then, finalize withdraw(user assert from secondary chain gateway to user addr) in secondary chain
     pub is_primary_chain: Option<bool>,
 
     /// withdraw to l1 target address
@@ -401,7 +405,7 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
 
                 let l1_receiver = withdrawal_initiated_event.l_1_receiver;
 
-                (get_l1_bridge_burn_message_keccak(b.amount, l1_receiver, l1_address)?, Default::default())
+                (get_l1_bridge_burn_message_keccak(b.amount, l1_receiver, l1_address)?, Address::default())
             }
             WithdrawalEvents::Withdrawal(w) => (get_l1_withdraw_message_keccak(&w)?, w.l_1_receiver),
             WithdrawalEvents::WithdrawalWithMessage(w) => (get_l1_withdraw_with_message_keccak(&w)?, w.l_1_receiver)
