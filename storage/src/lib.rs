@@ -735,7 +735,8 @@ pub async fn withdrawals_to_finalize_with_blacklist(
     let eth_threshold = eth_threshold.unwrap_or(U256::zero());
 
     let is_gate_way_query = gate_way_addr.is_some();
-    let gate_way_addr = gate_way_addr.as_ref().unwrap().as_bytes();
+    let default_addr = Address::default();
+    let gate_way_addr = gate_way_addr.as_ref().unwrap_or(&default_addr).as_bytes();
 
     let data = sqlx::query!(
         "
@@ -765,7 +766,7 @@ pub async fn withdrawals_to_finalize_with_blacklist(
           AND (
               ($4 AND l2_to_l1_events.to_address = $5 AND is_primary_chain = FALSE)
                 OR
-              (NOT $4 AND (is_primary_chain IS NULL OR is_primary_chain = TRUE))
+              (NOT $4 AND is_primary_chain = TRUE)
           )
           AND finalization_data.l2_block_number <= COALESCE(
             (
@@ -833,7 +834,8 @@ pub async fn withdrawals_to_finalize_with_whitelist(
     let eth_threshold = eth_threshold.unwrap_or(U256::zero());
 
     let is_gate_way_query = gate_way_addr.is_some();
-    let gate_way_addr = gate_way_addr.as_ref().unwrap().as_bytes();
+    let default_addr = Address::default();
+    let gate_way_addr = gate_way_addr.as_ref().unwrap_or(&default_addr).as_bytes();
 
     let data = sqlx::query!(
         "
@@ -863,7 +865,7 @@ pub async fn withdrawals_to_finalize_with_whitelist(
           AND (
               ($4 AND l2_to_l1_events.to_address = $5 AND is_primary_chain = FALSE)
                 OR
-              (NOT $4 AND (is_primary_chain IS NULL OR is_primary_chain = TRUE))
+              (NOT $4 AND is_primary_chain = TRUE)
           )
           AND finalization_data.l2_block_number <= COALESCE(
             (
@@ -930,7 +932,8 @@ pub async fn withdrawals_to_finalize(
     let eth_threshold = eth_threshold.unwrap_or(U256::zero());
 
     let is_gate_way_query = gate_way_addr.is_some();
-    let gate_way_addr = gate_way_addr.as_ref().unwrap().as_bytes();
+    let default_addr = Address::default();
+    let gate_way_addr = gate_way_addr.as_ref().unwrap_or(&default_addr).as_bytes();
 
     let data = sqlx::query!(
         "
@@ -960,7 +963,7 @@ pub async fn withdrawals_to_finalize(
           AND (
               ($3 AND l2_to_l1_events.to_address = $4 AND is_primary_chain = FALSE)
                 OR
-              (NOT $3 AND (is_primary_chain IS NULL OR is_primary_chain = TRUE))
+              (NOT $3 AND is_primary_chain = TRUE)
           )
           AND finalization_data.l2_block_number <= COALESCE(
             (
