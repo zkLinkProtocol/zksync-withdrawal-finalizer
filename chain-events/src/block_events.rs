@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use std::{sync::Arc, time::Duration};
 
+use ethers::prelude::Http;
 use ethers::{
     abi::{AbiDecode, Address, RawLog},
     contract::EthEvent,
@@ -8,15 +9,17 @@ use ethers::{
     providers::{Middleware, Provider, Ws},
     types::{BlockNumber, Filter, Log, Transaction, H256},
 };
-use ethers::prelude::Http;
 use futures::{Sink, SinkExt, StreamExt};
 
-use client::{zksync_contract::{
-    codegen::{
-        BlockCommitFilter, BlockExecutionFilter, BlocksVerificationFilter, CommitBatchesCall,
+use client::{
+    zksync_contract::{
+        codegen::{
+            BlockCommitFilter, BlockExecutionFilter, BlocksVerificationFilter, CommitBatchesCall,
+        },
+        parse_withdrawal_events_l1,
     },
-    parse_withdrawal_events_l1,
-}, BlockEvent, ZksyncMiddleware};
+    BlockEvent, ZksyncMiddleware,
+};
 use ethers_log_decode::EthLogDecode;
 
 use crate::{metrics::CHAIN_EVENTS_METRICS, Error, Result};
@@ -100,7 +103,7 @@ impl BlockEvents {
                 from_block,
                 sender.clone(),
                 middleware.clone(),
-                &l2_client
+                &l2_client,
             )
             .await
             {
@@ -153,9 +156,11 @@ impl BlockEvents {
             .expect("last block always has a number; qed");
 
         if last_seen_block.as_number().unwrap() == latest_finalized_block {
-            tracing::info!("Block events has been synchronized to the latest L1[{latest_finalized_block}].");
+            tracing::info!(
+                "Block events has been synchronized to the latest L1[{latest_finalized_block}]."
+            );
             tokio::time::sleep(Duration::from_secs(5)).await;
-            return Ok(last_seen_block)
+            return Ok(last_seen_block);
         }
 
         tracing::info!(
@@ -183,7 +188,7 @@ impl BlockEvents {
         while let Some(log) = logs.next().await {
             let Ok(log) = log else {
                 tracing::warn!("L1 block events stream ended with {}", log.unwrap_err());
-                return Ok(last_seen_block)
+                return Ok(last_seen_block);
             };
 
             let Some(block_number) = log.block_number.map(|bn| bn.as_u64()) else {
@@ -275,8 +280,16 @@ where
             if let Ok(commit_batches) = CommitBatchesCall::decode(&tx.input) {
                 let mut pubdata = Vec::with_capacity(commit_batches.new_batches_data.len());
                 for batch in commit_batches.new_batches_data.iter() {
-                    pubdata.push(l2_client.get_batch_data_availability(batch.batch_number as u32).await?.unwrap());
-                    tracing::info!("Get Batch[{}] data availability successfully.", batch.batch_number);
+                    pubdata.push(
+                        l2_client
+                            .get_batch_data_availability(batch.batch_number as u32)
+                            .await?
+                            .unwrap(),
+                    );
+                    tracing::info!(
+                        "Get Batch[{}] data availability successfully.",
+                        batch.batch_number
+                    );
                 }
 
                 let mut res = parse_withdrawal_events_l1(
@@ -291,7 +304,10 @@ where
                 );
                 events.append(&mut res);
             } else {
-                panic!("Failed to decode CommitBatchesCall: {:?}; qed", log.transaction_hash);
+                panic!(
+                    "Failed to decode CommitBatchesCall: {:?}; qed",
+                    log.transaction_hash
+                );
             }
             sender
                 .send(BlockEvent::L2ToL1Events { events })

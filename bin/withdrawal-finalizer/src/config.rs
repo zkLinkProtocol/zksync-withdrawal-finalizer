@@ -42,7 +42,10 @@ pub struct Config {
     pub withdrawal_finalizer_addr: Address,
 
     /// Address of the `L1Bridge` contract in second chain.
-    #[envconfig(from = "CONTRACTS_SECOND_CHAIN_L1_ERC20_BRIDGE_PROXY_ADDRS", default = "[]")]
+    #[envconfig(
+        from = "CONTRACTS_SECOND_CHAIN_L1_ERC20_BRIDGE_PROXY_ADDRS",
+        default = "[]"
+    )]
     pub second_chain_l1_erc20_bridge_proxy_addrs: AddrList,
 
     /// Second chain main contract
@@ -50,7 +53,10 @@ pub struct Config {
     pub second_chain_diamond_proxy_addrs: AddrList,
 
     /// Second chain finalizer contract
-    #[envconfig(from = "CONTRACTS_SECOND_CHAIN_WITHDRAWAL_FINALIZER_CONTRACTS", default = "[]")]
+    #[envconfig(
+        from = "CONTRACTS_SECOND_CHAIN_WITHDRAWAL_FINALIZER_CONTRACTS",
+        default = "[]"
+    )]
     pub second_chain_withdrawal_finalizer_addrs: AddrList,
 
     /// Second chain gateway addresses in primary chain

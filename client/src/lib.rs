@@ -69,10 +69,10 @@ pub mod l1messenger;
 pub mod l2bridge;
 pub mod l2standard_token;
 pub mod withdrawal_finalizer;
+pub mod zklink_contract;
+pub mod zklink_getters;
 pub mod zksync_contract;
 pub mod zksync_types;
-pub mod zklink_getters;
-pub mod zklink_contract;
 
 /// is this eth?
 pub fn is_eth(address: Address) -> bool {
@@ -324,7 +324,10 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
     ) -> Result<Option<BatchAvailableOnChainData>> {
         let latency = CLIENT_METRICS.call[&"get_l1_batch_DA"].start();
         let res = self
-            .request::<[u32; 1], Option<BatchAvailableOnChainData>>("zks_getL1BatchDA", [batch_number])
+            .request::<[u32; 1], Option<BatchAvailableOnChainData>>(
+                "zks_getL1BatchDA",
+                [batch_number],
+            )
             .await?;
 
         latency.observe();
@@ -429,10 +432,17 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
 
                 let l1_receiver = withdrawal_initiated_event.l_1_receiver;
 
-                (get_l1_bridge_burn_message_keccak(b.amount, l1_receiver, l1_address)?, Address::default())
+                (
+                    get_l1_bridge_burn_message_keccak(b.amount, l1_receiver, l1_address)?,
+                    Address::default(),
+                )
             }
-            WithdrawalEvents::Withdrawal(w) => (get_l1_withdraw_message_keccak(&w)?, w.l_1_receiver),
-            WithdrawalEvents::WithdrawalWithMessage(w) => (get_l1_withdraw_with_message_keccak(&w)?, w.l_1_receiver)
+            WithdrawalEvents::Withdrawal(w) => {
+                (get_l1_withdraw_message_keccak(&w)?, w.l_1_receiver)
+            }
+            WithdrawalEvents::WithdrawalWithMessage(w) => {
+                (get_l1_withdraw_with_message_keccak(&w)?, w.l_1_receiver)
+            }
         };
 
         let l2_to_l1_log_index = receipt

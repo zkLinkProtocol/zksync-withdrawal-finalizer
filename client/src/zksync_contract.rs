@@ -17,10 +17,10 @@ pub mod codegen {
     abigen!(IZkSync, "$CARGO_MANIFEST_DIR/src/contracts/IZkSync.json");
 }
 
+use crate::zksync_types::BatchAvailableOnChainData;
 use codegen::{
     BlockCommitFilter, BlockExecutionFilter, BlocksRevertFilter, BlocksVerificationFilter,
 };
-use crate::zksync_types::BatchAvailableOnChainData;
 
 use self::codegen::{CommitBatchesCall, FinalizeEthWithdrawalCall};
 
@@ -174,7 +174,9 @@ pub fn parse_withdrawal_events_l1(
 ) -> Vec<L2ToL1Event> {
     let mut withdrawals = vec![];
 
-    for (data, BatchAvailableOnChainData{ data: logs_pubdata}) in call.new_batches_data.iter().zip(pubdata) {
+    for (data, BatchAvailableOnChainData { data: logs_pubdata }) in
+        call.new_batches_data.iter().zip(pubdata)
+    {
         let mut cursor = 0;
         let length_bytes = match logs_pubdata.get(..4) {
             Some(b) => b,
