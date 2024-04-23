@@ -8,13 +8,13 @@
 use std::{str::FromStr, sync::Arc, time::Duration};
 
 use envconfig::Envconfig;
+use ethers::signers::Signer;
 use ethers::{
     prelude::SignerMiddleware,
     providers::{Http, JsonRpcClient, Middleware, Provider},
     signers::LocalWallet,
     types::U256,
 };
-use ethers::signers::Signer;
 use eyre::{anyhow, Result};
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -22,13 +22,13 @@ use sqlx::{
 };
 
 use chain_events::{BlockEvents, L2EventsListener};
-use client::{l1bridge::codegen::IL1Bridge, zksync_contract::codegen::IZkSync, ZksyncMiddleware};
-use config::Config;
-use tokio::sync::watch;
-use vise_exporter::MetricsExporter;
 use client::withdrawal_finalizer::codegen::WithdrawalFinalizer;
 use client::zklink_contract::codegen::ZkLink;
+use client::{l1bridge::codegen::IL1Bridge, zksync_contract::codegen::IZkSync, ZksyncMiddleware};
+use config::Config;
 use finalizer::SecondChainFinalizer;
+use tokio::sync::watch;
+use vise_exporter::MetricsExporter;
 use watcher::Watcher;
 
 use crate::metrics::MAIN_FINALIZER_METRICS;
@@ -223,12 +223,16 @@ async fn main() -> Result<()> {
     }
 
     // l1 events(contains l2 commit prove execute, parse l1 log contains withdraw)
-    let event_mux = BlockEvents::new(config.eth_client_ws_url.as_ref());
+    let event_mux = BlockEvents::new(
+        config.eth_client_ws_url.as_ref(),
+        config.eth_client_http_url.as_ref(),
+    );
     let block_events_handle = tokio::spawn(event_mux.run_with_reconnects(
         config.diamond_proxy_addr,
         config.l2_erc20_bridge_addr,
         from_l1_block,
         blocks_tx_wrapped,
+        client_l2.clone(),
     ));
 
     // l2 events(ContractDeployed, BridgeBurn, Withdrawal)
@@ -271,7 +275,7 @@ async fn main() -> Result<()> {
     let client_l1_with_signer = Arc::new(
         SignerMiddleware::new_with_provider_chain(client_l1.clone(), wallet.clone())
             .await
-            .unwrap()
+            .unwrap(),
     );
     let finalizer_account_address = client_l1_with_signer.address();
     let contract = WithdrawalFinalizer::new(
@@ -297,7 +301,6 @@ async fn main() -> Result<()> {
     let zksync_contract = IZkSync::new(config.diamond_proxy_addr, client_l1.clone());
 
     let second_chains_contracts = generate_secondary_chains_from_config(&config, wallet).await;
-
     let finalizer = finalizer::Finalizer::new(
         pgpool.clone(),
         one_withdrawal_gas_limit,
@@ -311,7 +314,7 @@ async fn main() -> Result<()> {
         config.tokens_to_finalize.unwrap_or_default(),
         meter_withdrawals,
         eth_finalization_threshold,
-        config.finalize_withdraw_chain.unwrap_or_default()
+        config.finalize_withdraw_chain.unwrap_or_default(),
     );
     let finalizer_handle = tokio::spawn(finalizer.run(client_l2));
 
@@ -351,34 +354,39 @@ async fn main() -> Result<()> {
 /// Whether PrimaryChain or SecondaryChain withdrawals, gateway_addr_in_primary_chain must exist
 /// In case of PrimaryChain withdrawals, we allow finalizer_contract, zklink_contract, l1_bridge without configuration.
 /// In case of SecondaryChain withdrawals, we require finalizer_contract, zklink_contract, l1_bridge to be configured, otherwise the program will be panic immediately afterward.
-pub async fn generate_secondary_chains_from_config<S: Signer + Clone>(config: &Config, wallet: S)
-    -> Vec<SecondChainFinalizer<SignerMiddleware<Arc<Provider<Http>>, S>, Provider<Http>>> {
+pub async fn generate_secondary_chains_from_config<S: Signer + Clone>(
+    config: &Config,
+    wallet: S,
+) -> Vec<SecondChainFinalizer<SignerMiddleware<Arc<Provider<Http>>, S>, Provider<Http>>> {
     let mut second_chain_main_contract = Vec::new();
 
     let mut second_chain_diamond_proxy_addrs = config.second_chain_diamond_proxy_addrs.iter();
-    let mut second_chain_withdrawal_finalizer_addrs = config.second_chain_withdrawal_finalizer_addrs.iter();
-    let mut second_chain_l1_erc20_bridge_proxy_addrs = config.second_chain_l1_erc20_bridge_proxy_addrs.iter();
+    let mut second_chain_withdrawal_finalizer_addrs =
+        config.second_chain_withdrawal_finalizer_addrs.iter();
+    let mut second_chain_l1_erc20_bridge_proxy_addrs =
+        config.second_chain_l1_erc20_bridge_proxy_addrs.iter();
     let mut secondary_chain_client_http_url = config.secondary_chain_client_http_url.iter();
     for &gateway_address in config.second_chain_gateway_addrs_in_primary_chain.iter() {
         let (finalizer_contract, zklink_contract, l1_bridge) = if let (
             Some(diamond_proxy_addr),
-            Some(withdrawal_finalizer_addr),
             Some(l1_erc20_bridge_proxy_addr),
-            Some(client_http_url)
-        ) =  (
+            Some(client_http_url),
+        ) = (
             second_chain_diamond_proxy_addrs.next(),
-            second_chain_withdrawal_finalizer_addrs.next(),
             second_chain_l1_erc20_bridge_proxy_addrs.next(),
-            secondary_chain_client_http_url.next()
+            secondary_chain_client_http_url.next(),
         ) {
-            let client_l1: Arc<Provider<Http>> = Arc::new(client_http_url.as_ref().try_into().unwrap());
+            let client_l1: Arc<Provider<Http>> =
+                Arc::new(client_http_url.as_ref().try_into().unwrap());
             let client_l1_with_signer = Arc::new(
                 SignerMiddleware::new_with_provider_chain(client_l1.clone(), wallet.clone())
                     .await
                     .unwrap(),
             );
             (
-                Some(WithdrawalFinalizer::new(*withdrawal_finalizer_addr, client_l1_with_signer.clone())),
+                second_chain_withdrawal_finalizer_addrs
+                    .next()
+                    .map(|addr| WithdrawalFinalizer::new(*addr, client_l1_with_signer.clone())),
                 Some(ZkLink::new(*diamond_proxy_addr, client_l1.clone())),
                 Some(IL1Bridge::new(*l1_erc20_bridge_proxy_addr, client_l1)),
             )

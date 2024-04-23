@@ -517,7 +517,7 @@
       "anonymous": false,
       "inputs": [
         {
-          "indexed": false,
+          "indexed": true,
           "internalType": "address",
           "name": "secondaryChainGateway",
           "type": "address"
@@ -580,6 +580,43 @@
         }
       ],
       "name": "SyncL2TxHash",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "secondaryChainGateway",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "fromBatchNumber",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "toBatchNumber",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "rangeBatchRootHash",
+          "type": "bytes32"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "forwardEthAmount",
+          "type": "uint256"
+        }
+      ],
+      "name": "SyncRangeBatchRoot",
       "type": "event"
     },
     {
@@ -763,9 +800,9 @@
               "type": "bytes"
             },
             {
-              "internalType": "bytes",
-              "name": "totalL2ToL1Pubdata",
-              "type": "bytes"
+              "internalType": "bytes32",
+              "name": "providedL2ToL1PubdataHash",
+              "type": "bytes32"
             }
           ],
           "internalType": "struct IExecutor.CommitBatchInfo[]",
@@ -2215,6 +2252,29 @@
         }
       ],
       "name": "syncL2TxHash",
+      "outputs": [],
+      "stateMutability": "payable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address[]",
+          "name": "_secondaryChainGateways",
+          "type": "address[]"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_fromBatchNumber",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_toBatchNumber",
+          "type": "uint256"
+        }
+      ],
+      "name": "syncRangeBatchRoot",
       "outputs": [],
       "stateMutability": "payable",
       "type": "function"

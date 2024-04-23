@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE\n              finalization_data\n            SET\n              last_finalization_attempt = NOW(),\n              failed_finalization_attempts = failed_finalization_attempts + 1\n             WHERE withdrawal_id = (\n                 SELECT id\n                 FROM withdrawals\n                 WHERE tx_hash = $1\n                 AND event_index_in_tx = $2\n                 AND is_primary_chain = $3\n             )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Int4",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "68e01bba24c27caae474798b358eb5971566b6d4bda0e0d3ce79f05a7d898b17"
+}

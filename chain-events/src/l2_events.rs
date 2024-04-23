@@ -173,7 +173,7 @@ impl L2EventsListener {
         &self,
         bridge_init_log: ZksyncLog,
     ) -> Result<Option<(L2TokenInitEvent, Address)>> {
-        let raw_log: RawLog = bridge_init_log.clone().into();
+        let raw_log: RawLog = (&bridge_init_log).into();
 
         let Ok(bridge_initialize) = BridgeInitEvents::decode_log(&raw_log) else {
             return Ok(None);
@@ -475,8 +475,12 @@ impl L2EventsListener {
                     match l2_event {
                         L2Events::BridgeBurn(_) => tracing::info!("process l2 event: BridgeBurn"),
                         L2Events::Withdrawal(_) => tracing::info!("process l2 event: Withdrawal"),
-                        L2Events::WithdrawalWithMessage(_) => tracing::info!("process l2 event: WithdrawalWithMessage"),
-                        L2Events::ContractDeployed(_) => tracing::info!("process l2 event: ContractDeployed"),
+                        L2Events::WithdrawalWithMessage(_) => {
+                            tracing::info!("process l2 event: WithdrawalWithMessage")
+                        }
+                        L2Events::ContractDeployed(_) => {
+                            tracing::info!("process l2 event: ContractDeployed")
+                        }
                     }
                     CHAIN_EVENTS_METRICS.withdrawal_events.inc();
 

@@ -1,10 +1,11 @@
-use ethers::abi::Address;
 use client::l1bridge::codegen::IL1Bridge;
 use client::withdrawal_finalizer::codegen::WithdrawalFinalizer;
 use client::zklink_contract::codegen::ZkLink;
+use ethers::abi::Address;
 
 #[derive(Clone)]
-pub struct SecondChainFinalizer<M1, M2> where
+pub struct SecondChainFinalizer<M1, M2>
+where
     M1: Clone,
     M2: Clone,
 {

@@ -17,6 +17,7 @@ pub mod codegen {
     abigen!(IZkSync, "$CARGO_MANIFEST_DIR/src/contracts/IZkSync.json");
 }
 
+use crate::zksync_types::BatchAvailableOnChainData;
 use codegen::{
     BlockCommitFilter, BlockExecutionFilter, BlocksRevertFilter, BlocksVerificationFilter,
 };
@@ -167,13 +168,15 @@ pub struct L2ToL1Event {
 // TODO: rewrite in `nom`.
 pub fn parse_withdrawal_events_l1(
     call: &CommitBatchesCall,
+    pubdata: Vec<BatchAvailableOnChainData>,
     l1_block_number: u64,
     l2_erc20_bridge_addr: Address,
 ) -> Vec<L2ToL1Event> {
     let mut withdrawals = vec![];
 
-    for data in &call.new_batches_data {
-        let logs_pubdata = &data.total_l2_to_l1_pubdata;
+    for (data, BatchAvailableOnChainData { data: logs_pubdata }) in
+        call.new_batches_data.iter().zip(pubdata)
+    {
         let mut cursor = 0;
         let length_bytes = match logs_pubdata.get(..4) {
             Some(b) => b,

@@ -606,23 +606,21 @@ pub async fn add_finalization_data(pool: &PgPool, wd: &[WithdrawalParams]) -> Re
         ) ",
     );
 
-    let query = query_builder.push_values(wd, |mut b, w| {
-        b.push_bind(w.id as i64)
-            .push_bind(w.l2_block_number as i64)
-            .push_bind(w.l1_batch_number.as_u64() as i64)
-            .push_bind(w.l2_message_index as i32)
-            .push_bind(w.l2_tx_number_in_block as i32)
-            .push_bind(w.message.to_vec())
-            .push_bind(w.sender.0.to_vec())
-            .push_bind(bincode::serialize(&w.proof).unwrap())
-            .push_bind(w.is_primary_chain);
-    })
+    let query = query_builder
+        .push_values(wd, |mut b, w| {
+            b.push_bind(w.id as i64)
+                .push_bind(w.l2_block_number as i64)
+                .push_bind(w.l1_batch_number.as_u64() as i64)
+                .push_bind(w.l2_message_index as i32)
+                .push_bind(w.l2_tx_number_in_block as i32)
+                .push_bind(w.message.to_vec())
+                .push_bind(w.sender.0.to_vec())
+                .push_bind(bincode::serialize(&w.proof).unwrap())
+                .push_bind(w.is_primary_chain);
+        })
         .build();
 
-    let _rows_affected = query
-        .execute(pool)
-        .await
-        .map(|r| r.rows_affected())?;
+    let _rows_affected = query.execute(pool).await.map(|r| r.rows_affected())?;
 
     latency.observe();
 
@@ -1148,10 +1146,11 @@ pub async fn finalization_data_set_finalized_in_tx(
 
     let latency = STORAGE_METRICS.call[&"finalization_data_set_finalized_in_tx"].start();
 
-    for ((tx_hash, event_index_in_tx), is_primary_chain) in tx_hashes.into_iter()
+    for ((tx_hash, event_index_in_tx), is_primary_chain) in tx_hashes
+        .into_iter()
         .zip(event_index_in_tx)
         .zip(is_primary_chain)
-     {
+    {
         let _rows_affected = sqlx::query!(
             "UPDATE finalization_data
              SET finalization_tx = $1
@@ -1162,11 +1161,14 @@ pub async fn finalization_data_set_finalized_in_tx(
                  AND event_index_in_tx = $3
                  AND is_primary_chain = $4
              )",
-            finalized_tx_hash.0.as_slice(), tx_hash, event_index_in_tx, is_primary_chain
+            finalized_tx_hash.0.as_slice(),
+            tx_hash,
+            event_index_in_tx,
+            is_primary_chain
         )
-            .execute(pool)
-            .await?
-            .rows_affected();
+        .execute(pool)
+        .await?
+        .rows_affected();
     }
 
     latency.observe();
@@ -1192,7 +1194,8 @@ pub async fn inc_unsuccessful_finalization_attempts(
 
     let latency = STORAGE_METRICS.call[&"inc_unsuccessful_finalization_attempts"].start();
 
-    for ((tx_hash, event_index_in_tx), is_primary_chain) in tx_hashes.into_iter()
+    for ((tx_hash, event_index_in_tx), is_primary_chain) in tx_hashes
+        .into_iter()
         .zip(event_index_in_tx)
         .zip(is_primary_chain)
     {
@@ -1209,11 +1212,13 @@ pub async fn inc_unsuccessful_finalization_attempts(
                  AND event_index_in_tx = $2
                  AND is_primary_chain = $3
              )",
-            tx_hash, event_index_in_tx, is_primary_chain
+            tx_hash,
+            event_index_in_tx,
+            is_primary_chain
         )
-            .execute(pool)
-            .await?
-            .rows_affected();
+        .execute(pool)
+        .await?
+        .rows_affected();
     }
 
     latency.observe();

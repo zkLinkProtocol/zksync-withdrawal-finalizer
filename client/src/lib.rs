@@ -40,6 +40,7 @@ pub use zksync_types::WithdrawalEvent;
 
 use crate::l2bridge::codegen::WithdrawalInitiatedFilter;
 use crate::metrics::CLIENT_METRICS;
+use crate::zksync_types::BatchAvailableOnChainData;
 
 /// Eth token address
 pub const ETH_TOKEN_ADDRESS: Address = H160([
@@ -68,10 +69,10 @@ pub mod l1messenger;
 pub mod l2bridge;
 pub mod l2standard_token;
 pub mod withdrawal_finalizer;
+pub mod zklink_contract;
+pub mod zklink_getters;
 pub mod zksync_contract;
 pub mod zksync_types;
-pub mod zklink_getters;
-pub mod zklink_contract;
 
 /// is this eth?
 pub fn is_eth(address: Address) -> bool {
@@ -211,6 +212,16 @@ pub trait ZksyncMiddleware: Middleware {
         l2_to_l1_index: Option<u64>,
     ) -> Result<Option<L2ToL1LogProof>>;
 
+    /// Get the `zksync` available data of the specified Batch.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch_number`: the number of the batch
+    async fn get_batch_data_availability(
+        &self,
+        batch_number: u32,
+    ) -> Result<Option<BatchAvailableOnChainData>>;
+
     /// Call `zks_getL1BatchBlockRange` RPC method.
     ///
     /// # Arguments
@@ -307,6 +318,22 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
         Ok(res)
     }
 
+    async fn get_batch_data_availability(
+        &self,
+        batch_number: u32,
+    ) -> Result<Option<BatchAvailableOnChainData>> {
+        let latency = CLIENT_METRICS.call[&"get_l1_batch_DA"].start();
+        let res = self
+            .request::<[u32; 1], Option<BatchAvailableOnChainData>>(
+                "zks_getL1BatchDA",
+                [batch_number],
+            )
+            .await?;
+
+        latency.observe();
+        Ok(res)
+    }
+
     async fn get_l1_batch_block_range(&self, batch_number: u32) -> Result<Option<(U64, U64)>> {
         let latency = CLIENT_METRICS.call[&"get_l1_batch_block_range"].start();
         let res = self
@@ -360,7 +387,7 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
             .nth(index)
             .ok_or(Error::WithdrawalLogNotFound(index, withdrawal_hash))?;
 
-        let raw_log: RawLog = withdrawal_log.clone().into();
+        let raw_log: RawLog = withdrawal_log.into();
         let withdrawal_event = WithdrawalEvents::decode_log(&raw_log)?;
 
         let (l2_to_l1_message_hash, to_l1_address) = match withdrawal_event {
@@ -394,7 +421,7 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
                     .logs
                     .iter()
                     .filter_map(|log| {
-                        let raw_log: RawLog = log.clone().into();
+                        let raw_log: RawLog = log.into();
                         <WithdrawalInitiatedFilter as EthEvent>::decode_log(&raw_log).ok()
                     })
                     .nth(index)
@@ -405,10 +432,17 @@ impl<P: JsonRpcClient> ZksyncMiddleware for Provider<P> {
 
                 let l1_receiver = withdrawal_initiated_event.l_1_receiver;
 
-                (get_l1_bridge_burn_message_keccak(b.amount, l1_receiver, l1_address)?, Address::default())
+                (
+                    get_l1_bridge_burn_message_keccak(b.amount, l1_receiver, l1_address)?,
+                    Address::default(),
+                )
             }
-            WithdrawalEvents::Withdrawal(w) => (get_l1_withdraw_message_keccak(&w)?, w.l_1_receiver),
-            WithdrawalEvents::WithdrawalWithMessage(w) => (get_l1_withdraw_with_message_keccak(&w)?, w.l_1_receiver)
+            WithdrawalEvents::Withdrawal(w) => {
+                (get_l1_withdraw_message_keccak(&w)?, w.l_1_receiver)
+            }
+            WithdrawalEvents::WithdrawalWithMessage(w) => {
+                (get_l1_withdraw_with_message_keccak(&w)?, w.l_1_receiver)
+            }
         };
 
         let l2_to_l1_log_index = receipt

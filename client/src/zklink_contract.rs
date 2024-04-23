@@ -1,4 +1,3 @@
-
 #[allow(missing_docs)]
 pub mod codegen {
     use ethers::prelude::abigen;
