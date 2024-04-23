@@ -290,7 +290,7 @@ where
             self.pgpool.clone(),
             middleware,
             self.zksync_contract.clone(),
-            self.l1_bridge().clone(),
+            self.l1_bridge.clone(),
             self.second_chains.clone(),
         ));
 
@@ -499,7 +499,7 @@ where
         let total_executed_batches_number = self.synced_batch_number().await?.as_u32() as i64;
         tracing::info!("begin iteration of the finalizer loop: Batch Number({})", total_executed_batches_number);
 
-        let try_finalize_these = match &self.token_list {
+        let mut try_finalize_these = match &self.token_list {
             TokenList::All => {
                 storage::withdrawals_to_finalize(
                     &self.pgpool,
@@ -541,13 +541,27 @@ where
             tokio::time::sleep(self.no_new_withdrawals_backoff).await;
             tracing::info!("There are currently no transactions that need to be finalized!");
             return Ok(());
+        } else {
+            // filter some finalized txs
+            let are_finalized =
+                get_finalized_withdrawals(&try_finalize_these, &self.zksync_contract, &self.l1_bridge, &self.second_chains).await?;
+            try_finalize_these = try_finalize_these
+                .into_iter()
+                .filter(|t| !are_finalized.contains(&t.key()))
+                .collect::<Vec<_>>();
+            storage::finalization_data_set_finalized_in_tx(
+                &self.pgpool,
+                &are_finalized.into_iter().collect::<Vec<_>>(),
+                H256::zero(),
+            )
+                .await?;
         }
 
         let mut accumulator = self.new_accumulator().await?;
         let mut iter = try_finalize_these.into_iter().peekable();
 
         while let Some(t) = iter.next() {
-            tracing::info!("Add tx[{}] to {:?}[{}] accumulator", t.tx_hash, self.which_chain_tx(&t.to_address), t.to_address);
+            tracing::info!("Add withdraw-to-{:?}[{}] Tx[{}] to accumulator", self.which_chain_tx(&t.to_address), t.to_address, t.tx_hash);
             accumulator.add_withdrawal(t);
 
             if accumulator.ready_to_finalize() || iter.peek().is_none() {
@@ -561,7 +575,6 @@ where
                 FINALIZER_METRICS
                     .predicted_to_fail_withdrawals
                     .inc_by(predicted_to_fail.len() as u64);
-
 
                 if !predicted_to_fail.is_empty() {
                     tracing::warn!("predicted to fail: {predicted_to_fail:?}");
@@ -604,7 +617,7 @@ where
         let predicted = std::mem::take(&mut self.unsuccessful);
         tracing::debug!("requesting finalization status of withdrawals");
         let are_finalized =
-            get_finalized_withdrawals(&predicted, &self.zksync_contract, self.l1_bridge(), &self.second_chains).await?;
+            get_finalized_withdrawals(&predicted, &self.zksync_contract, &self.l1_bridge, &self.second_chains).await?;
 
         let mut already_finalized = vec![];
         let mut unsuccessful = vec![];

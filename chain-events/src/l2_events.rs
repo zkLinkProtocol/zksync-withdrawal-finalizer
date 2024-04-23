@@ -173,7 +173,7 @@ impl L2EventsListener {
         &self,
         bridge_init_log: ZksyncLog,
     ) -> Result<Option<(L2TokenInitEvent, Address)>> {
-        let raw_log: RawLog = bridge_init_log.clone().into();
+        let raw_log: RawLog = (&bridge_init_log).into();
 
         let Ok(bridge_initialize) = BridgeInitEvents::decode_log(&raw_log) else {
             return Ok(None);

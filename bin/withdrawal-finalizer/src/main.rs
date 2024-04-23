@@ -223,12 +223,13 @@ async fn main() -> Result<()> {
     }
 
     // l1 events(contains l2 commit prove execute, parse l1 log contains withdraw)
-    let event_mux = BlockEvents::new(config.eth_client_ws_url.as_ref());
+    let event_mux = BlockEvents::new(config.eth_client_ws_url.as_ref(), config.eth_client_http_url.as_ref());
     let block_events_handle = tokio::spawn(event_mux.run_with_reconnects(
         config.diamond_proxy_addr,
         config.l2_erc20_bridge_addr,
         from_l1_block,
         blocks_tx_wrapped,
+        client_l2.clone(),
     ));
 
     // l2 events(ContractDeployed, BridgeBurn, Withdrawal)
@@ -297,7 +298,6 @@ async fn main() -> Result<()> {
     let zksync_contract = IZkSync::new(config.diamond_proxy_addr, client_l1.clone());
 
     let second_chains_contracts = generate_secondary_chains_from_config(&config, wallet).await;
-
     let finalizer = finalizer::Finalizer::new(
         pgpool.clone(),
         one_withdrawal_gas_limit,
@@ -362,12 +362,10 @@ pub async fn generate_secondary_chains_from_config<S: Signer + Clone>(config: &C
     for &gateway_address in config.second_chain_gateway_addrs_in_primary_chain.iter() {
         let (finalizer_contract, zklink_contract, l1_bridge) = if let (
             Some(diamond_proxy_addr),
-            Some(withdrawal_finalizer_addr),
             Some(l1_erc20_bridge_proxy_addr),
             Some(client_http_url)
         ) =  (
             second_chain_diamond_proxy_addrs.next(),
-            second_chain_withdrawal_finalizer_addrs.next(),
             second_chain_l1_erc20_bridge_proxy_addrs.next(),
             secondary_chain_client_http_url.next()
         ) {
@@ -378,7 +376,8 @@ pub async fn generate_secondary_chains_from_config<S: Signer + Clone>(config: &C
                     .unwrap(),
             );
             (
-                Some(WithdrawalFinalizer::new(*withdrawal_finalizer_addr, client_l1_with_signer.clone())),
+                second_chain_withdrawal_finalizer_addrs.next()
+                    .map(|addr| WithdrawalFinalizer::new(*addr, client_l1_with_signer.clone())),
                 Some(ZkLink::new(*diamond_proxy_addr, client_l1.clone())),
                 Some(IL1Bridge::new(*l1_erc20_bridge_proxy_addr, client_l1)),
             )

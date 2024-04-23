@@ -24,5 +24,11 @@ impl<E: Debug + Display> From<LogQueryError<E>> for Error {
     }
 }
 
+impl From<client::Error> for Error {
+    fn from(value: client::Error) -> Self {
+        Self::Middleware(value.to_string())
+    }
+}
+
 /// The crate result type.
 pub type Result<T> = std::result::Result<T, Error>;

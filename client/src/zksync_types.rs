@@ -31,6 +31,12 @@ pub struct L2ToL1LogProof {
     pub root: H256,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchAvailableOnChainData {
+    pub data: Bytes,
+}
+
 /// A transaction receipt in `zksync` network.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransactionReceipt {
@@ -149,9 +155,9 @@ impl Log {
     }
 }
 
-impl From<Log> for RawLog {
-    fn from(val: Log) -> Self {
-        (val.topics, val.data.to_vec()).into()
+impl From<&Log> for RawLog {
+    fn from(val: &Log) -> Self {
+        (val.topics.clone(), val.data.to_vec()).into()
     }
 }
 
