@@ -771,9 +771,11 @@ where
         match result {
             Ok(r) => {
                 if gate_way_addrs.contains(&r.to_address) {
-                    let mut primary_withdraw_params = r.clone();
-                    primary_withdraw_params.is_primary_chain = Some(true);
-                    ok_results.push(primary_withdraw_params);
+                    if is_eth(r.sender) { // In primary chain, Only Eth needs to do finalizeWithdraw, Erc20 doesn't.
+                        let mut primary_withdraw_params = r.clone();
+                        primary_withdraw_params.is_primary_chain = Some(true);
+                        ok_results.push(primary_withdraw_params);
+                    }
                     let mut second_withdraw_params = r;
                     second_withdraw_params.is_primary_chain = Some(false);
                     ok_results.push(second_withdraw_params);
