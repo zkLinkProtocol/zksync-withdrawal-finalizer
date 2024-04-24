@@ -18,7 +18,7 @@ use ethers::{
 use eyre::{anyhow, Result};
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
-    ConnectOptions, PgConnection,
+    PgConnection,
 };
 
 use chain_events::{BlockEvents, L2EventsListener};
@@ -180,8 +180,7 @@ async fn main() -> Result<()> {
     let blocks_tx_wrapped = tokio_util::sync::PollSender::new(blocks_tx.clone());
     let blocks_rx = tokio_stream::wrappers::ReceiverStream::new(blocks_rx);
 
-    let options =
-        PgConnectOptions::from_str(config.database_url.as_str())?.disable_statement_logging();
+    let options = PgConnectOptions::from_str(config.database_url.as_str())?;
 
     let pgpool = PgPoolOptions::new()
         .acquire_timeout(Duration::from_secs(2))
