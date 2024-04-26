@@ -37,6 +37,12 @@ pub struct BatchAvailableOnChainData {
     pub data: Bytes,
 }
 
+impl From<Bytes> for BatchAvailableOnChainData {
+    fn from(value: Bytes) -> Self {
+        Self { data: value }
+    }
+}
+
 /// A transaction receipt in `zksync` network.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransactionReceipt {

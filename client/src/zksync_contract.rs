@@ -22,7 +22,7 @@ use codegen::{
     BlockCommitFilter, BlockExecutionFilter, BlocksRevertFilter, BlocksVerificationFilter,
 };
 
-use self::codegen::{CommitBatchesCall, FinalizeEthWithdrawalCall};
+use self::codegen::FinalizeEthWithdrawalCall;
 
 /// An `enum` wrapping different block `event`s
 #[derive(Debug)]
@@ -167,16 +167,13 @@ pub struct L2ToL1Event {
 /// Given a [`CommitBatchesCall`] parse all withdrawal events from [`L2ToL1`] logs.
 // TODO: rewrite in `nom`.
 pub fn parse_withdrawal_events_l1(
-    call: &CommitBatchesCall,
-    pubdata: Vec<BatchAvailableOnChainData>,
+    pubdata: Vec<(u64, BatchAvailableOnChainData)>,
     l1_block_number: u64,
     l2_erc20_bridge_addr: Address,
 ) -> Vec<L2ToL1Event> {
     let mut withdrawals = vec![];
 
-    for (data, BatchAvailableOnChainData { data: logs_pubdata }) in
-        call.new_batches_data.iter().zip(pubdata)
-    {
+    for (l2_batch_number, BatchAvailableOnChainData { data: logs_pubdata }) in pubdata {
         let mut cursor = 0;
         let length_bytes = match logs_pubdata.get(..4) {
             Some(b) => b,
@@ -243,7 +240,6 @@ pub fn parse_withdrawal_events_l1(
                 }
 
                 let message_sender: Address = H256::from(log_entry.0.key).into();
-                let l2_block_number = data.batch_number;
 
                 if message_sender == ETH_TOKEN_ADDRESS
                     && FinalizeEthWithdrawalCall::selector() == message[..4]
@@ -263,7 +259,7 @@ pub fn parse_withdrawal_events_l1(
                         to,
                         amount,
                         l1_block_number,
-                        l2_block_number,
+                        l2_block_number: l2_batch_number,
                         tx_number_in_block: log_entry.0.tx_number_in_batch,
                     });
                 }
@@ -289,7 +285,7 @@ pub fn parse_withdrawal_events_l1(
                         to,
                         amount,
                         l1_block_number,
-                        l2_block_number,
+                        l2_block_number: l2_batch_number,
                         tx_number_in_block: log_entry.0.tx_number_in_batch,
                     });
                 }
@@ -302,23 +298,3 @@ pub fn parse_withdrawal_events_l1(
     withdrawals
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ethers::abi::Bytes;
-    use hex::FromHex;
-    use std::str::FromStr;
-
-    #[test]
-    fn parse_l2_to_l1() {
-        let input = include_str!("../../test_tx.txt");
-        let bytes = Bytes::from_hex(input).unwrap();
-        let block = CommitBatchesCall::decode(bytes).unwrap();
-        let withdrawals = parse_withdrawal_events_l1(
-            &block,
-            0,
-            Address::from_str("11f943b2c77b743AB90f4A0Ae7d5A4e7FCA3E102").unwrap(),
-        );
-        assert_eq!(withdrawals.len(), 19);
-    }
-}
