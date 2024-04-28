@@ -86,9 +86,6 @@ pub struct Config {
     #[envconfig(from = "BATCH_FINALIZATION_GAS_LIMIT")]
     pub batch_finalization_gas_limit: String,
 
-    #[envconfig(from = "BATCH_FINALIZATION_GAS_PRICE")]
-    pub finalize_gas_price: String,
-
     #[envconfig(from = "WITHDRAWAL_FINALIZER_ACCOUNT_PRIVATE_KEY")]
     pub account_private_key: String,
 

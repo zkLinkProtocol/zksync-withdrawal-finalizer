@@ -283,7 +283,6 @@ async fn main() -> Result<()> {
     );
     let batch_finalization_gas_limit = U256::from_dec_str(&config.batch_finalization_gas_limit)?;
     let one_withdrawal_gas_limit = U256::from_dec_str(&config.one_withdrawal_gas_limit)?;
-    let finalize_gas_price = U256::from_dec_str(&config.finalize_gas_price)?;
 
     tracing::info!(
         "finalization gas limits one: {}, batch: {}",
@@ -305,7 +304,6 @@ async fn main() -> Result<()> {
         pgpool.clone(),
         one_withdrawal_gas_limit,
         batch_finalization_gas_limit,
-        finalize_gas_price,
         contract,
         zksync_contract,
         second_chains_contracts,
