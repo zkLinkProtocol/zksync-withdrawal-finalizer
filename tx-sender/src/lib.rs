@@ -96,6 +96,7 @@ pub async fn send_tx_adjust_gas<M, T>(
     retry_timeout: Duration,
     nonce: U256,
     gas_limit: U256,
+    gas_price: U256,
 ) -> Result<Option<TransactionReceipt>, <M as Middleware>::Error>
 where
     M: Middleware,
@@ -105,6 +106,7 @@ where
     m.fill_transaction(&mut submit_tx, None).await?;
     submit_tx.set_nonce(nonce);
     submit_tx.set_gas(gas_limit);
+    submit_tx.set_gas(gas_price);
 
     for retry_num in 0..usize::MAX {
         if retry_num > 0 {
@@ -182,6 +184,7 @@ mod tests {
                 Duration::from_secs(1),
                 0.into(),
                 6000000.into(),
+                50000000.into(),
             )
             .await
             .unwrap_err()
@@ -251,14 +254,16 @@ mod tests {
                     tx_1,
                     Duration::from_secs(1),
                     0.into(),
-                    6000000.into()
+                    6000000.into(),
+                    500000000.into()
                 ),
                 send_tx_adjust_gas(
                     provider.clone(),
                     tx_2,
                     Duration::from_secs(1),
                     1.into(),
-                    6000000.into()
+                    6000000.into(),
+                    500000000.into()
                 )
             );
             first.unwrap();
@@ -405,6 +410,7 @@ mod tests {
                 Duration::from_secs(1),
                 0.into(),
                 6000000.into(),
+                50000000.into(),
             )
             .await
             .unwrap()
