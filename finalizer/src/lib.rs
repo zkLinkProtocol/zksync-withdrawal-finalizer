@@ -384,6 +384,12 @@ where
             .get_transaction_count(self.account_address, None)
             .await
             .map_err(|e| Error::Middleware(format!("{e}")))?;
+        let gas_price = self
+            .finalizer_contract()
+            .client()
+            .get_gas_price()
+            .await
+            .map_err(|e| Error::Middleware(format!("{e}")))?;
 
         let tx = tx_sender::send_tx_adjust_gas(
             self.finalizer_contract().client(),
@@ -391,6 +397,7 @@ where
             self.tx_retry_timeout,
             nonce,
             self.batch_finalization_gas_limit,
+            gas_price,
         )
         .await;
 
