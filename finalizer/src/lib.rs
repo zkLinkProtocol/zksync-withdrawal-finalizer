@@ -156,6 +156,8 @@ where
     l1_bridge: IL1Bridge<M2>,
     unsuccessful: Vec<WithdrawalParams>,
 
+    finalize_gas_price: U256,
+
     no_new_withdrawals_backoff: Duration,
     query_db_pagination_limit: u64,
     tx_fee_limit: U256,
@@ -192,6 +194,7 @@ where
         pgpool: PgPool,
         one_withdrawal_gas_limit: U256,
         batch_finalization_gas_limit: U256,
+        finalize_gas_price: U256,
         finalizer_contract: WithdrawalFinalizer<S>,
         zksync_contract: IZkSync<M>,
         second_chains: Vec<SecondChainFinalizer<S, M>>,
@@ -220,6 +223,7 @@ where
             zksync_contract,
             l1_bridge,
             unsuccessful: vec![],
+            finalize_gas_price,
             no_new_withdrawals_backoff: NO_NEW_WITHDRAWALS_BACKOFF,
             query_db_pagination_limit: QUERY_DB_PAGINATION_LIMIT,
             tx_fee_limit,
@@ -384,12 +388,6 @@ where
             .get_transaction_count(self.account_address, None)
             .await
             .map_err(|e| Error::Middleware(format!("{e}")))?;
-        let gas_price = self
-            .finalizer_contract()
-            .client()
-            .get_gas_price()
-            .await
-            .map_err(|e| Error::Middleware(format!("{e}")))?;
 
         let tx = tx_sender::send_tx_adjust_gas(
             self.finalizer_contract().client(),
@@ -397,7 +395,7 @@ where
             self.tx_retry_timeout,
             nonce,
             self.batch_finalization_gas_limit,
-            gas_price,
+            self.finalize_gas_price,
         )
         .await;
 
