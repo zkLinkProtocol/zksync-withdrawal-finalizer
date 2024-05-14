@@ -106,7 +106,7 @@ where
     m.fill_transaction(&mut submit_tx, None).await?;
     submit_tx.set_nonce(nonce);
     submit_tx.set_gas(gas_limit);
-    submit_tx.set_gas(gas_price);
+    submit_tx.set_gas_price(gas_price);
 
     for retry_num in 0..usize::MAX {
         if retry_num > 0 {
