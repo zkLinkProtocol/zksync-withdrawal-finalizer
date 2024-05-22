@@ -963,17 +963,6 @@ pub async fn withdrawals_to_finalize(
                 OR
               (NOT $3 AND is_primary_chain = TRUE)
           )
-          AND finalization_data.l2_block_number <= COALESCE(
-            (
-              SELECT
-                MAX(l2_block_number)
-              FROM
-                l2_blocks
-              WHERE
-                execute_l1_block_number IS NOT NULL
-            ),
-            1
-          )
           AND (
             last_finalization_attempt IS NULL
           OR
