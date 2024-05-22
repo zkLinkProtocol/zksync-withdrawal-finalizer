@@ -53,6 +53,7 @@ async fn start_from_l1_block<M1, M2>(
     client_l1: Arc<M1>,
     client_l2: Arc<M2>,
     conn: &mut PgConnection,
+    config: &Config,
 ) -> Result<u64>
 where
     M1: Middleware,
@@ -82,7 +83,7 @@ where
 
             let block_details = client_l2
                 .provider()
-                .get_block_details(1)
+                .get_block_details(config.start_from_l2_block.unwrap_or(1) as u32)
                 .await?
                 .expect("Always start from the block that there is info about; qed");
 
@@ -205,6 +206,7 @@ async fn main() -> Result<()> {
         client_l1.clone(),
         client_l2.clone(),
         &mut pgpool.acquire().await?.detach(),
+        &config
     )
     .await?;
 
