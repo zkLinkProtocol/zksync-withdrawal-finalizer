@@ -206,7 +206,7 @@ async fn main() -> Result<()> {
         client_l1.clone(),
         client_l2.clone(),
         &mut pgpool.acquire().await?.detach(),
-        &config
+        &config,
     )
     .await?;
 

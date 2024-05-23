@@ -24,7 +24,7 @@ use ethers::{
 pub use l2_events::L2EventsListener;
 
 /// All L2 Events the service is interested in.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum L2Event {
     /// There has been a restart from block of given number
     RestartedFromBlock(u64),
@@ -50,7 +50,7 @@ impl From<L2TokenInitEvent> for L2Event {
 
 /// Information on the deployment of a token to L2 from
 /// `BridgeInitialize` event.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L2TokenInitEvent {
     /// Address of the token on L1
     pub l1_token_address: Address,

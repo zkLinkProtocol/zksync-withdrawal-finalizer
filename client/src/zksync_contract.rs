@@ -143,7 +143,7 @@ impl AbiDecode for L2LogCompresed {
 const L2_TO_L1_LOG_SERIALIZED_SIZE: usize = 88;
 
 /// Information about withdrawals from [`L2ToL1`] logs.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L2ToL1Event {
     /// L1 address of the token
     pub token: Address,
@@ -297,4 +297,3 @@ pub fn parse_withdrawal_events_l1(
 
     withdrawals
 }
-

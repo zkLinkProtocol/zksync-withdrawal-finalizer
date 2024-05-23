@@ -29,6 +29,12 @@ pub enum Error {
     ClientError(#[from] client::Error),
 }
 
+impl Error {
+    pub fn client_error(error: String) -> Self {
+        Self::ClientError(client::Error::Middleware(error))
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct Watcher<M2> {
@@ -189,7 +195,7 @@ impl BlockRangesParams {
 }
 
 async fn request_block_ranges<M2>(
-    event: BlockEvent,
+    event: &BlockEvent,
     l2_middleware: M2,
 ) -> Result<Option<BlockRangesParams>>
 where
@@ -210,7 +216,7 @@ where
                 Ok(Some(BlockRangesParams::Commit {
                     range_begin: range_begin.as_u64(),
                     range_end: range_end.as_u64(),
-                    block_number,
+                    block_number: *block_number,
                 }))
             } else {
                 Ok(None)
@@ -237,7 +243,7 @@ where
                 Ok(Some(BlockRangesParams::Verify {
                     range_begin,
                     range_end,
-                    block_number,
+                    block_number: *block_number,
                 }))
             } else {
                 tracing::warn!(
@@ -260,7 +266,7 @@ where
                 Ok(Some(BlockRangesParams::Execute {
                     range_begin: range_begin.as_u64(),
                     range_end: range_end.as_u64(),
-                    block_number,
+                    block_number: *block_number,
                 }))
             } else {
                 Ok(None)
@@ -270,13 +276,15 @@ where
             tracing::error!("Received a blocks revert event: {event:?}");
             Ok(None)
         }
-        BlockEvent::L2ToL1Events { events } => Ok(Some(BlockRangesParams::L2ToL1Events { events })),
+        BlockEvent::L2ToL1Events { events } => Ok(Some(BlockRangesParams::L2ToL1Events {
+            events: events.to_vec(),
+        })),
     }
 }
 
 async fn process_block_events<M2>(
     pool: &PgPool,
-    events: Vec<BlockEvent>,
+    events: &[BlockEvent],
     l2_middleware: M2,
 ) -> Result<()>
 where
@@ -284,7 +292,7 @@ where
 {
     let results: Result<Vec<_>> = futures::future::join_all(
         events
-            .into_iter()
+            .iter()
             .map(|event| request_block_ranges(event, &l2_middleware)),
     )
     .await
@@ -361,12 +369,12 @@ where
         if block_event_batch.len() >= batch_size || batch_begin.elapsed() > batch_backoff {
             tracing::debug!("processing batch of l1 events {}", block_event_batch.len());
 
-            process_block_events(
-                &pool,
-                std::mem::take(&mut block_event_batch),
-                &l2_middleware,
-            )
-            .await?;
+            while let Err(e) =
+                process_block_events(&pool, &block_event_batch, &l2_middleware).await
+            {
+                tracing::error!("process l1 block event error: {}", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
 
             batch_begin = Instant::now();
         }
@@ -389,44 +397,67 @@ where
     let mut curr_l2_block_number = from_l2_block;
     let mut in_block_events = vec![];
     while let Some(event) = we.next().await {
-        match event {
-            L2Event::Withdrawal(event) => {
-                tracing::info!("received withdrawal event {event:?}");
-                if event.block_number > curr_l2_block_number {
-                    tracing::info!("process withdrawal event: {}", event.tx_hash);
-                    process_withdrawals_in_block(
-                        &pool,
-                        std::mem::take(&mut in_block_events),
-                        &mut withdrawals_meterer,
-                    )
-                    .await?;
-                    curr_l2_block_number = event.block_number;
-                }
-                in_block_events.push(event);
-            }
-            L2Event::L2TokenInitEvent(event) => {
-                tracing::debug!("l2 token init event {event:?}");
-                storage::add_token(&pool, &event).await?;
-            }
-            L2Event::RestartedFromBlock(_block_number) => {
-                // The event producer has been restarted at a givenni
-                // block height. It is going to re-send all events
-                // from that block number up. However the already received
-                // events need to be processed because they may never be sent again.
-                //
-                // Consider the situation where events at following block already sit in the
-                // accumulator:
-                // `[1042]`.
-                //
-                // The producer is restarted from block `1045`, and as such event at `1042`
-                // will never be re-sent.
+        while let Err(e) = process_l2_events(
+            &pool,
+            event.clone(),
+            &mut withdrawals_meterer,
+            &mut curr_l2_block_number,
+            &mut in_block_events,
+        )
+        .await
+        {
+            tracing::error!("process l2 block event: {event:?}, error: {}", e);
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    }
+
+    Ok(())
+}
+
+async fn process_l2_events(
+    pool: &PgPool,
+    event: L2Event,
+    withdrawals_meterer: &mut Option<WithdrawalsMeter>,
+    curr_l2_block_number: &mut u64,
+    in_block_events: &mut Vec<WithdrawalEvent>,
+) -> Result<()> {
+    match event {
+        L2Event::Withdrawal(event) => {
+            tracing::info!("received withdrawal event {event:?}");
+            if event.block_number > *curr_l2_block_number {
+                tracing::info!("process withdrawal event: {}", event.tx_hash);
                 process_withdrawals_in_block(
-                    &pool,
-                    std::mem::take(&mut in_block_events),
-                    &mut withdrawals_meterer,
+                    pool,
+                    std::mem::take(in_block_events),
+                    withdrawals_meterer,
                 )
                 .await?;
+                *curr_l2_block_number = event.block_number;
             }
+            in_block_events.push(event);
+        }
+        L2Event::L2TokenInitEvent(event) => {
+            tracing::debug!("l2 token init event {event:?}");
+            storage::add_token(pool, &event).await?;
+        }
+        L2Event::RestartedFromBlock(_block_number) => {
+            // The event producer has been restarted at a givenni
+            // block height. It is going to re-send all events
+            // from that block number up. However the already received
+            // events need to be processed because they may never be sent again.
+            //
+            // Consider the situation where events at following block already sit in the
+            // accumulator:
+            // `[1042]`.
+            //
+            // The producer is restarted from block `1045`, and as such event at `1042`
+            // will never be re-sent.
+            process_withdrawals_in_block(
+                pool,
+                std::mem::take(in_block_events),
+                withdrawals_meterer,
+            )
+            .await?;
         }
     }
 

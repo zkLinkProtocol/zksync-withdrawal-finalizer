@@ -12,13 +12,13 @@ use ethers::{
 use futures::{Sink, SinkExt, StreamExt};
 
 use client::{
+    old_zksync_contract::codegen::CommitBatchesCall as OldCommitBatchesCall,
     zksync_contract::{
         codegen::{
             BlockCommitFilter, BlockExecutionFilter, BlocksVerificationFilter, CommitBatchesCall,
         },
         parse_withdrawal_events_l1,
     },
-    old_zksync_contract::codegen::CommitBatchesCall as OldCommitBatchesCall,
     BlockEvent, ZksyncMiddleware,
 };
 use ethers_log_decode::EthLogDecode;
@@ -278,7 +278,7 @@ where
 
             let mut events = vec![];
 
-            let pubdata= if let Ok(commit_batches) = CommitBatchesCall::decode(&tx.input) {
+            let pubdata = if let Ok(commit_batches) = CommitBatchesCall::decode(&tx.input) {
                 let mut pubdata = Vec::with_capacity(commit_batches.new_batches_data.len());
                 for batch in commit_batches.new_batches_data.iter() {
                     pubdata.push((
@@ -286,7 +286,7 @@ where
                         l2_client
                             .get_batch_data_availability(batch.batch_number as u32)
                             .await?
-                            .unwrap()
+                            .unwrap(),
                     ));
                     tracing::info!(
                         "Get Batch[{}] data availability successfully.",
@@ -295,13 +295,11 @@ where
                 }
                 pubdata
             } else if let Ok(commit_batches) = OldCommitBatchesCall::decode(&tx.input) {
-                commit_batches.new_batches_data
+                commit_batches
+                    .new_batches_data
                     .into_iter()
                     .map(|batch| {
-                        tracing::info!(
-                            "Get Batch[{}] pubdata successfully.",
-                            batch.batch_number
-                        );
+                        tracing::info!("Get Batch[{}] pubdata successfully.", batch.batch_number);
                         (batch.batch_number, batch.total_l2_to_l1_pubdata.into())
                     })
                     .collect()

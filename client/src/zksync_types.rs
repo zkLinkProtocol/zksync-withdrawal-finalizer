@@ -187,7 +187,7 @@ pub struct L2ToL1Log {
 }
 
 /// Withdrawal event struct
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WithdrawalEvent {
     /// A hash of the transaction of this withdrawal.
     pub tx_hash: H256,
