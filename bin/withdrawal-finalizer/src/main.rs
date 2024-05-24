@@ -9,6 +9,7 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 
 use envconfig::Envconfig;
 use ethers::signers::Signer;
+use ethers::types::Transaction;
 use ethers::{
     prelude::SignerMiddleware,
     providers::{Http, JsonRpcClient, Middleware, Provider},
@@ -61,50 +62,38 @@ where
     M2: Middleware,
     <M2 as Middleware>::Provider: JsonRpcClient,
 {
-    match (
-        storage::last_l2_to_l1_events_block_seen(conn).await?,
-        storage::last_l1_block_seen(conn).await?,
-    ) {
-        (Some(b1), Some(b2)) => Ok(std::cmp::min(b1, b2)),
-        (b1, b2) => {
-            if b1.is_none() {
+    let l2_block_number = if let Some(l2_block_number) = config.start_from_l2_block {
+        l2_block_number as u32
+    } else {
+        let l2_to_l1_events_block = storage::last_l2_to_l1_events_block_seen(conn).await?;
+        let l1_block = storage::last_l1_block_seen(conn).await?;
+        if let (Some(l2_to_l1_events_block), Some(l1_block)) = (l2_to_l1_events_block, l1_block) {
+            return Ok(std::cmp::min(l2_to_l1_events_block, l1_block));
+        } else {
+            if l2_to_l1_events_block.is_none() {
                 tracing::info!(concat!(
                     "information about l2 to l1 events is missing, ",
                     "starting from L1 block corresponding to L2 block 1"
                 ));
             }
-
-            if b2.is_none() {
+            if l1_block.is_none() {
                 tracing::info!(concat!(
                     "information about last block seen is missing, ",
                     "starting from L1 block corresponding to L2 block 1"
                 ));
             }
+            1
+        }
+    };
 
-            let block_details = client_l2
-                .provider()
-                .get_block_details(config.start_from_l2_block.unwrap_or(1) as u32)
-                .await?
-                .expect("Always start from the block that there is info about; qed");
-
-            let commit_tx_hash = block_details
-                .commit_tx_hash
-                .expect("A first block on L2 is always committed; qed");
-
-            let commit_tx = client_l1
-                .get_transaction(commit_tx_hash)
-                .await
-                .map_err(|e| anyhow!("{e}"))?
-                .expect("The corresponding L1 tx exists; qed");
-
-            let commit_tx_block_number = commit_tx
+    get_on_chain_tx_from_l2_block(client_l1, client_l2, l2_block_number)
+        .await
+        .map(|tx| {
+            tx.expect("The corresponding L1 tx exists; qed")
                 .block_number
                 .expect("Already mined TX always has a block number; qed")
-                .as_u64();
-
-            Ok(commit_tx_block_number)
-        }
-    }
+                .as_u64()
+        })
 }
 
 // Determine an L2 block to start processing withdrawals from.
@@ -139,6 +128,33 @@ async fn start_from_l2_block<M: Middleware>(
     };
 
     Ok(res)
+}
+
+async fn get_on_chain_tx_from_l2_block<M1, M2>(
+    client_l1: Arc<M1>,
+    client_l2: Arc<M2>,
+    l2_block: u32,
+) -> Result<Option<Transaction>>
+where
+    M1: Middleware,
+    <M1 as Middleware>::Provider: JsonRpcClient,
+    M2: Middleware,
+    <M2 as Middleware>::Provider: JsonRpcClient,
+{
+    let block_details = client_l2
+        .provider()
+        .get_block_details(l2_block)
+        .await?
+        .expect("Always start from the block that there is info about; qed");
+
+    let commit_tx_hash = block_details
+        .commit_tx_hash
+        .expect("A first block on L2 is always committed; qed");
+
+    client_l1
+        .get_transaction(commit_tx_hash)
+        .await
+        .map_err(|e| anyhow!("{e}"))
 }
 
 #[tokio::main]

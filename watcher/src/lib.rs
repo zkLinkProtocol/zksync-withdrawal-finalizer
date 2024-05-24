@@ -369,8 +369,7 @@ where
         if block_event_batch.len() >= batch_size || batch_begin.elapsed() > batch_backoff {
             tracing::debug!("processing batch of l1 events {}", block_event_batch.len());
 
-            while let Err(e) =
-                process_block_events(&pool, &block_event_batch, &l2_middleware).await
+            while let Err(e) = process_block_events(&pool, &block_event_batch, &l2_middleware).await
             {
                 tracing::error!("process l1 block event error: {}", e);
                 tokio::time::sleep(Duration::from_secs(5)).await;
