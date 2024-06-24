@@ -187,7 +187,9 @@ impl BlockRangesParams {
                 );
             }
             BlockRangesParams::L2ToL1Events { events } => {
+                let events_print = format!("{:?}", events);
                 process_l2_to_l1_events(pool, events).await?;
+                tracing::info!("Procsse l2 to l1 evnets: {}", events_print);
             }
         }
         Ok(())

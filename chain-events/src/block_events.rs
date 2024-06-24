@@ -195,7 +195,6 @@ impl BlockEvents {
             let Some(block_number) = log.block_number.map(|bn| bn.as_u64()) else {
                 continue;
             };
-            last_seen_block = block_number.into();
 
             let raw_log: RawLog = log.clone().into();
             if let Ok(l1_event) = L1Events::decode_log(&raw_log) {
@@ -209,9 +208,10 @@ impl BlockEvents {
                 )
                 .await?;
             }
+            last_seen_block = block_number.into();
         }
 
-        tracing::info!("all event streams have terminated, exiting...");
+        tracing::info!("all event streams have terminated[last_seen_block={latest_finalized_block}], exiting...");
         last_seen_block = latest_finalized_block.as_u64().into();
 
         Ok(last_seen_block)
