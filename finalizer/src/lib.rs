@@ -803,7 +803,7 @@ where
             Ok(r) => {
                 if gate_way_addrs.contains(&r.to_address) {
                     if is_eth(r.sender) {
-                        // In primary chain, Only Eth needs to do finalizeWithdraw, Erc20 doesn't.
+                        // In the primary chain, Only Eth needs to do finalizeWithdraw, Erc20 doesn't.
                         let mut primary_withdraw_params = r.clone();
                         primary_withdraw_params.is_primary_chain = Some(true);
                         ok_results.push(primary_withdraw_params);

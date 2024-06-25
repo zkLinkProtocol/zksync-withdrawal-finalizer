@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use std::cmp::min;
 use std::{sync::Arc, time::Duration};
 
 use ethers::prelude::Http;
@@ -28,6 +29,7 @@ use crate::{metrics::CHAIN_EVENTS_METRICS, Error, Result};
 // Total timecap for tx querying retry 10 minutes
 const PENDING_TX_RETRY: usize = 12 * 10;
 const PENDING_TX_RETRY_BACKOFF: Duration = Duration::from_secs(5);
+const MAX_FILTER_BLOCK_RANGE: usize = 5000;
 
 #[derive(EthLogDecode)]
 enum L1Events {
@@ -155,6 +157,10 @@ impl BlockEvents {
             .expect("last block number always exists in a live network; qed")
             .number
             .expect("last block always has a number; qed");
+        let latest_finalized_block = min(
+            latest_finalized_block,
+            last_seen_block.as_number().unwrap() + MAX_FILTER_BLOCK_RANGE,
+        );
 
         if last_seen_block.as_number().unwrap() == latest_finalized_block {
             tracing::info!(
