@@ -21,6 +21,10 @@ pub struct Config {
     #[envconfig(from = "ETH_CLIENT_HTTP_URL")]
     pub eth_client_http_url: Url,
 
+    /// the filter the block num of every query block event.
+    #[envconfig(from = "ETH_FILTER_BLOCK_NUM")]
+    pub filter_block_num: u32,
+
     /// L1 secondary chain HTTP url.
     #[envconfig(from = "SECOND_CHAIN_CLIENT_HTTP_URL", default = "[]")]
     pub secondary_chain_client_http_url: UrlList,

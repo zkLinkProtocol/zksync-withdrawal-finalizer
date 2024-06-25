@@ -29,7 +29,6 @@ use crate::{metrics::CHAIN_EVENTS_METRICS, Error, Result};
 // Total timecap for tx querying retry 10 minutes
 const PENDING_TX_RETRY: usize = 12 * 10;
 const PENDING_TX_RETRY_BACKOFF: Duration = Duration::from_secs(5);
-const MAX_FILTER_BLOCK_RANGE: usize = 5000;
 
 #[derive(EthLogDecode)]
 enum L1Events {
@@ -48,6 +47,7 @@ enum L1Events {
 pub struct BlockEvents {
     ws_url: String,
     http_url: String,
+    filter_block_num: u32,
 }
 
 impl BlockEvents {
@@ -56,10 +56,11 @@ impl BlockEvents {
     /// # Arguments
     ///
     /// * `middleware`: The middleware to perform requests with.
-    pub fn new(ws_url: &str, http_url: &str) -> BlockEvents {
+    pub fn new(ws_url: &str, http_url: &str, filter_block_num: u32) -> BlockEvents {
         Self {
             ws_url: ws_url.to_string(),
             http_url: http_url.to_string(),
+            filter_block_num,
         }
     }
 
@@ -98,6 +99,7 @@ impl BlockEvents {
     {
         let mut from_block: BlockNumber = from_block.into();
         let middleware = Arc::new(Provider::<Http>::try_from(self.http_url).unwrap());
+        let max_filter_block_num = self.filter_block_num;
 
         loop {
             match Self::run(
@@ -107,6 +109,7 @@ impl BlockEvents {
                 sender.clone(),
                 middleware.clone(),
                 &l2_client,
+                max_filter_block_num,
             )
             .await
             {
@@ -141,6 +144,7 @@ impl BlockEvents {
         mut sender: S,
         middleware: M,
         l2_client: M2,
+        max_filter_block_num: u32,
     ) -> Result<BlockNumber>
     where
         B: Into<BlockNumber> + Copy,
@@ -159,7 +163,7 @@ impl BlockEvents {
             .expect("last block always has a number; qed");
         let latest_finalized_block = min(
             latest_finalized_block,
-            last_seen_block.as_number().unwrap() + MAX_FILTER_BLOCK_RANGE,
+            last_seen_block.as_number().unwrap() + max_filter_block_num,
         );
 
         if last_seen_block.as_number().unwrap() == latest_finalized_block {

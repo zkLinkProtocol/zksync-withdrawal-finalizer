@@ -243,6 +243,7 @@ async fn main() -> Result<()> {
     let event_mux = BlockEvents::new(
         config.eth_client_ws_url.as_ref(),
         config.eth_client_http_url.as_ref(),
+        config.filter_block_num,
     );
     let block_events_handle = tokio::spawn(event_mux.run_with_reconnects(
         config.diamond_proxy_addr,
