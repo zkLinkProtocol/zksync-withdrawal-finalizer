@@ -189,7 +189,7 @@ impl BlockRangesParams {
             BlockRangesParams::L2ToL1Events { events } => {
                 let events_print = format!("{:?}", events);
                 process_l2_to_l1_events(pool, events).await?;
-                tracing::info!("Procsse l2 to l1 evnets: {}", events_print);
+                tracing::info!("Write l2 to l1 events to storage: {}", events_print);
             }
         }
         Ok(())
@@ -292,6 +292,7 @@ async fn process_block_events<M2>(
 where
     M2: ZksyncMiddleware,
 {
+    tracing::debug!("Starting request block ranges");
     let results: Result<Vec<_>> = futures::future::join_all(
         events
             .iter()
@@ -306,6 +307,7 @@ where
     for result in results.into_iter().flatten() {
         result.write_to_storage(pool).await?;
     }
+    tracing::info!("Write all l1 events to storage successfully");
 
     Ok(())
 }
