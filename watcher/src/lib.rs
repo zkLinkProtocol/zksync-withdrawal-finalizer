@@ -6,7 +6,7 @@ use std::{
 use chain_events::L2Event;
 use ethers::providers::{JsonRpcClient, Middleware};
 use futures::{stream::StreamExt, Stream};
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use storage::StoredWithdrawal;
 use tokio::pin;
 
@@ -124,7 +124,10 @@ where
     }
 }
 
-async fn process_l2_to_l1_events(pool: &PgPool, events: Vec<L2ToL1Event>) -> Result<()> {
+async fn process_l2_to_l1_events(
+    pool: &mut Transaction<'_, Postgres>,
+    events: Vec<L2ToL1Event>,
+) -> Result<()> {
     storage::l2_to_l1_events(pool, &events).await?;
 
     Ok(())
@@ -152,14 +155,15 @@ enum BlockRangesParams {
 }
 
 impl BlockRangesParams {
-    async fn write_to_storage(self, pool: &PgPool) -> Result<()> {
+    async fn write_to_storage(self, transaction: &mut Transaction<'_, Postgres>) -> Result<()> {
         match self {
             BlockRangesParams::Commit {
                 range_begin,
                 range_end,
                 block_number,
             } => {
-                storage::committed_new_batch(pool, range_begin, range_end, block_number).await?;
+                storage::committed_new_batch(transaction, range_begin, range_end, block_number)
+                    .await?;
 
                 tracing::info!(
                     "Changed withdrawals status to committed for range {range_begin}-{range_end}"
@@ -170,7 +174,8 @@ impl BlockRangesParams {
                 range_end,
                 block_number,
             } => {
-                storage::verified_new_batch(pool, range_begin, range_end, block_number).await?;
+                storage::verified_new_batch(transaction, range_begin, range_end, block_number)
+                    .await?;
                 tracing::info!(
                     "Changed withdrawals status to verified for range {range_begin}-{range_end}"
                 );
@@ -180,7 +185,8 @@ impl BlockRangesParams {
                 range_end,
                 block_number,
             } => {
-                storage::executed_new_batch(pool, range_begin, range_end, block_number).await?;
+                storage::executed_new_batch(transaction, range_begin, range_end, block_number)
+                    .await?;
 
                 tracing::info!(
                     "Changed withdrawals status to executed for range {range_begin}-{range_end}"
@@ -188,7 +194,7 @@ impl BlockRangesParams {
             }
             BlockRangesParams::L2ToL1Events { events } => {
                 let events_print = format!("{:?}", events);
-                process_l2_to_l1_events(pool, events).await?;
+                process_l2_to_l1_events(transaction, events).await?;
                 tracing::info!("Write l2 to l1 events to storage: {}", events_print);
             }
         }
@@ -304,9 +310,12 @@ where
 
     let results = results?;
 
+    let mut transaction = pool.begin().await?;
     for result in results.into_iter().flatten() {
-        result.write_to_storage(pool).await?;
+        result.write_to_storage(&mut transaction).await?;
     }
+    transaction.commit().await?;
+
     tracing::info!("Write all l1 events to storage successfully");
 
     Ok(())
@@ -380,6 +389,7 @@ where
             }
 
             batch_begin = Instant::now();
+            block_event_batch.clear();
         }
     }
 
