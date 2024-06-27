@@ -224,8 +224,10 @@ impl BlockEvents {
             last_seen_block = block_number.into();
         }
 
-        tracing::info!("all event streams have terminated[last_seen_block={to_block}], exiting...");
-        last_seen_block = to_block.as_u64().into();
+        last_seen_block = std::cmp::max(to_block, last_seen_block.as_number().unwrap()).into();
+        tracing::info!(
+            "all event streams have terminated[last_seen_block={last_seen_block}], exiting..."
+        );
 
         Ok(last_seen_block)
     }
