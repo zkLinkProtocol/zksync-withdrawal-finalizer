@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-use std::cmp::min;
 use std::{sync::Arc, time::Duration};
 
 use ethers::prelude::Http;
@@ -165,19 +164,19 @@ impl BlockEvents {
             .expect("last block number always exists in a live network; qed")
             .number
             .expect("last block always has a number; qed");
-        let latest_finalized_block = min(
-            latest_finalized_block,
-            last_seen_block.as_number().unwrap() + max_filter_block_num,
-        );
 
-        if last_seen_block.as_number().unwrap() == latest_finalized_block {
+        if last_seen_block.as_number().unwrap() >= latest_finalized_block {
             tracing::info!(
                 "Block events has been synchronized to the latest L1[{latest_finalized_block}]."
             );
             tokio::time::sleep(Duration::from_secs(5)).await;
-            return Ok(last_seen_block);
+            return Ok(latest_finalized_block.as_u64().into());
         }
 
+        let to_block = std::cmp::min(
+            latest_finalized_block,
+            last_seen_block.as_number().unwrap() + max_filter_block_num,
+        );
         tracing::info!(
             "Filtering logs from {} to {}",
             from_block
@@ -185,12 +184,12 @@ impl BlockEvents {
                 .as_number()
                 .expect("always starting from a numbered block; qed")
                 .as_u64(),
-            latest_finalized_block.as_u64(),
+            to_block.as_u64(),
         );
 
         let past_filter = Filter::new()
             .from_block(from_block)
-            .to_block(latest_finalized_block)
+            .to_block(to_block)
             .address(diamond_proxy_addr)
             .topic0(vec![
                 BlockCommitFilter::signature(),
@@ -225,8 +224,8 @@ impl BlockEvents {
             last_seen_block = block_number.into();
         }
 
-        tracing::info!("all event streams have terminated[last_seen_block={latest_finalized_block}], exiting...");
-        last_seen_block = latest_finalized_block.as_u64().into();
+        tracing::info!("all event streams have terminated[last_seen_block={to_block}], exiting...");
+        last_seen_block = to_block.as_u64().into();
 
         Ok(last_seen_block)
     }
