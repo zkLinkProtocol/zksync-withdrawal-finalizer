@@ -81,7 +81,7 @@ impl L2EventsListener {
     }
 
     async fn connect(&self) -> Option<Provider<Ws>> {
-        match Provider::<Ws>::connect_with_reconnects(&self.url, 0).await {
+        match Provider::<Ws>::connect_with_reconnects(&self.url, 10).await {
             Ok(p) => {
                 CHAIN_EVENTS_METRICS.successful_l2_reconnects.inc();
                 Some(p)

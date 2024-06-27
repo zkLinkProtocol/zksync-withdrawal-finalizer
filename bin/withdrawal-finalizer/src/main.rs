@@ -38,6 +38,7 @@ mod config;
 mod metrics;
 
 const CHANNEL_CAPACITY: usize = 1024 * 16;
+const TIME_OUT: u64 = 30;
 
 fn run_vise_exporter() -> Result<watch::Sender<()>> {
     let (shutdown_sender, mut shutdown_receiver) = watch::channel(());
@@ -184,12 +185,21 @@ async fn main() -> Result<()> {
     // `ethers-rs`. In the logic of reconnections have to happen as long
     // as the application exists; below code configures that number to
     // be `usize::MAX` as such.
-    let provider_l1 = Provider::<Http>::try_from(config.eth_client_http_url.as_ref()).unwrap();
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(TIME_OUT))
+        .connect_timeout(Duration::from_secs(TIME_OUT))
+        .build()
+        .unwrap();
+    let provider_l1 = Provider::new(Http::new_with_client(
+        config.eth_client_http_url.clone(),
+        http_client.clone(),
+    ));
     let client_l1 = Arc::new(provider_l1);
 
-    let provider_l2 =
-        Provider::<Http>::try_from(config.api_web3_json_rpc_http_url.as_str()).unwrap();
-
+    let provider_l2 = Provider::new(Http::new_with_client(
+        config.api_web3_json_rpc_http_url.clone(),
+        http_client.clone(),
+    ));
     let client_l2 = Arc::new(provider_l2);
 
     let (blocks_tx, blocks_rx) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
@@ -251,6 +261,7 @@ async fn main() -> Result<()> {
         from_l1_block,
         blocks_tx_wrapped,
         client_l2.clone(),
+        http_client,
     ));
 
     // l2 events(ContractDeployed, BridgeBurn, Withdrawal)

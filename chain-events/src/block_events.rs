@@ -90,6 +90,7 @@ impl BlockEvents {
         from_block: B,
         sender: S,
         l2_client: M2,
+        http_client: reqwest::Client,
     ) -> Result<()>
     where
         B: Into<BlockNumber> + Copy,
@@ -98,7 +99,10 @@ impl BlockEvents {
         M2: ZksyncMiddleware + 'static,
     {
         let mut from_block: BlockNumber = from_block.into();
-        let middleware = Arc::new(Provider::<Http>::try_from(self.http_url).unwrap());
+        let middleware = Arc::new(Provider::new(Http::new_with_client(
+            self.http_url.parse::<reqwest::Url>().unwrap(),
+            http_client,
+        )));
         let max_filter_block_num = self.filter_block_num;
 
         loop {
