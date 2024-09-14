@@ -13,6 +13,7 @@ use futures::{Sink, SinkExt, StreamExt};
 
 use client::{
     old_zksync_contract::codegen::CommitBatchesCall as OldCommitBatchesCall,
+    zklink_contract_24_2::codegen::CommitBatchesSharedBridgeCall,
     zksync_contract::{
         codegen::{
             BlockCommitFilter, BlockExecutionFilter, BlocksVerificationFilter, CommitBatchesCall,
@@ -292,8 +293,9 @@ where
             });
 
             let mut events = vec![];
-
-            let pubdata = if let Ok(commit_batches) = CommitBatchesCall::decode(&tx.input) {
+            let pubdata = if let Ok(commit_batches) =
+                CommitBatchesSharedBridgeCall::decode(&tx.input)
+            {
                 let mut pubdata = Vec::with_capacity(commit_batches.new_batches_data.len());
                 for batch in commit_batches.new_batches_data.iter() {
                     pubdata.push((
@@ -305,6 +307,22 @@ where
                     ));
                     tracing::info!(
                         "Get Batch[{}] data availability successfully.",
+                        batch.batch_number
+                    );
+                }
+                pubdata
+            } else if let Ok(commit_batches) = CommitBatchesCall::decode(&tx.input) {
+                let mut pubdata = Vec::with_capacity(commit_batches.new_batches_data.len());
+                for batch in commit_batches.new_batches_data.iter() {
+                    pubdata.push((
+                        batch.batch_number,
+                        l2_client
+                            .get_batch_data_availability(batch.batch_number as u32)
+                            .await?
+                            .unwrap(),
+                    ));
+                    tracing::info!(
+                        "Get Batch[{}] data availability successfully after protocol 24.2.",
                         batch.batch_number
                     );
                 }

@@ -71,6 +71,7 @@ pub mod l2standard_token;
 pub mod old_zksync_contract;
 pub mod withdrawal_finalizer;
 pub mod zklink_contract;
+pub mod zklink_contract_24_2;
 pub mod zklink_getters;
 pub mod zksync_contract;
 pub mod zksync_types;
