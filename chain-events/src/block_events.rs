@@ -306,7 +306,7 @@ where
                             .unwrap(),
                     ));
                     tracing::info!(
-                        "Get Batch[{}] data availability successfully.",
+                        "Get Batch[{}](24.2) data availability successfully.",
                         batch.batch_number
                     );
                 }
@@ -322,7 +322,7 @@ where
                             .unwrap(),
                     ));
                     tracing::info!(
-                        "Get Batch[{}] data availability successfully after protocol 24.2.",
+                        "Get Batch[{}](20.2) data availability successfully.",
                         batch.batch_number
                     );
                 }
