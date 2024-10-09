@@ -1,6 +1,6 @@
-use std::{collections::HashSet, sync::Arc};
-
 use futures::{Sink, SinkExt, StreamExt};
+use std::time::Duration;
+use std::{collections::HashSet, sync::Arc};
 
 use client::{
     contracts_deployer::codegen::ContractDeployedFilter,
@@ -296,6 +296,8 @@ impl L2EventsListener {
                 ))
                 .await
                 .map_err(|_| Error::ChannelClosing)?;
+
+            tokio::time::sleep(Duration::from_secs(5)).await;
         }
     }
 }
@@ -337,24 +339,6 @@ impl L2EventsListener {
         let last_seen_l2_token_block: BlockNumber = last_seen_l2_token_block.into();
         let from_block: BlockNumber = from_block.into();
 
-        let past_topic0 = vec![
-            BridgeBurnFilter::signature(),
-            WithdrawalFilter::signature(),
-            WithdrawalWithMessageFilter::signature(),
-        ];
-
-        let topic0 = vec![
-            ContractDeployedFilter::signature(),
-            BridgeBurnFilter::signature(),
-            WithdrawalFilter::signature(),
-            WithdrawalWithMessageFilter::signature(),
-        ];
-
-        tracing::info!("topic0 {topic0:?}");
-
-        tracing::debug!("last_seen_l2_token_block {last_seen_l2_token_block:?}");
-        tracing::debug!("from_block {from_block:?}");
-
         let latest_block = middleware
             .get_block(BlockNumber::Latest)
             .await
@@ -373,10 +357,33 @@ impl L2EventsListener {
             .await?;
         }
 
+        if latest_block <= from_block.as_number().unwrap() {
+            tracing::info!("no block update");
+            return Ok((latest_block.into(), RunResult::OtherError));
+        }
+
+        let past_topic0 = vec![
+            BridgeBurnFilter::signature(),
+            WithdrawalFilter::signature(),
+            WithdrawalWithMessageFilter::signature(),
+        ];
+
+        let topic0 = vec![
+            ContractDeployedFilter::signature(),
+            BridgeBurnFilter::signature(),
+            WithdrawalFilter::signature(),
+            WithdrawalWithMessageFilter::signature(),
+        ];
+
+        tracing::info!("topic0 {topic0:?}");
+
+        tracing::debug!("last_seen_l2_token_block {last_seen_l2_token_block:?}");
+        tracing::debug!("from_block {from_block:?}");
+
         let mut tokens = self.tokens.iter().cloned().collect::<Vec<_>>();
         tokens.extend_from_slice(self.token_deployer_addrs.as_slice());
 
-        tracing::info!("Listeing to events from tokens {tokens:?}");
+        tracing::info!("Listening to events from tokens {tokens:?}");
 
         let past_filter = Filter::new()
             .from_block(from_block)
@@ -384,21 +391,21 @@ impl L2EventsListener {
             .address(tokens.clone())
             .topic0(past_topic0.clone());
 
-        let filter = Filter::new()
-            .from_block(latest_block + 1)
-            .address(tokens)
-            .topic0(topic0);
+        // let filter = Filter::new()
+        //     .from_block(latest_block + 1)
+        //     .address(tokens)
+        //     .topic0(topic0);
 
         tracing::info!("filter past {past_filter:#?}");
-        tracing::info!("filter {filter:#?}");
+        // tracing::info!("filter {filter:#?}");
 
         let past_logs = middleware.get_logs_paginated(&past_filter, pagination_step);
-        let current_logs = middleware
-            .subscribe_logs(&filter)
-            .await
-            .map_err(|e| Error::Middleware(e.to_string()))?;
+        // let current_logs = middleware
+        //     .subscribe_logs(&filter)
+        //     .await
+        //     .map_err(|e| Error::Middleware(e.to_string()))?;
 
-        let mut logs = past_logs.chain(current_logs.map(Ok));
+        let mut logs = past_logs;
         let mut successful_logs = 0;
 
         while let Some(log) = logs.next().await {
@@ -418,6 +425,7 @@ impl L2EventsListener {
             successful_logs += 1;
 
             if should_attempt_pagination_increase(pagination_step, successful_logs) {
+                tracing::info!("should attempt pagination increase");
                 return Ok((last_seen_block, RunResult::AttemptPaginationIncrease));
             }
 
@@ -451,7 +459,7 @@ impl L2EventsListener {
 
         tracing::info!("withdrawal streams being closed");
 
-        Ok((last_seen_block, RunResult::OtherError))
+        Ok((latest_block.into(), RunResult::OtherError))
     }
 
     async fn process_l2_event<M, S>(

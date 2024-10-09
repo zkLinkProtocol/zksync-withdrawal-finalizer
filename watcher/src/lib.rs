@@ -360,6 +360,7 @@ async fn process_withdrawals_in_block(
     }
 
     storage::add_withdrawals(pool, &stored_withdrawals).await?;
+    tracing::info!("Write withdrawals to storage: {stored_withdrawals:?}");
     Ok(())
 }
 
@@ -438,7 +439,10 @@ async fn process_l2_events(
         L2Event::Withdrawal(event) => {
             tracing::info!("received withdrawal event {event:?}");
             if event.block_number > *curr_l2_block_number {
-                tracing::info!("process withdrawal event: {}", event.tx_hash);
+                tracing::info!(
+                    "process withdrawal event(block_number < {})",
+                    event.block_number
+                );
                 process_withdrawals_in_block(
                     pool,
                     std::mem::take(in_block_events),
@@ -465,6 +469,7 @@ async fn process_l2_events(
             //
             // The producer is restarted from block `1045`, and as such event at `1042`
             // will never be re-sent.
+            tracing::info!("Restarted from block");
             process_withdrawals_in_block(
                 pool,
                 std::mem::take(in_block_events),
