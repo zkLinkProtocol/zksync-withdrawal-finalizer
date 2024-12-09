@@ -754,7 +754,7 @@ pub async fn withdrawals_to_finalize_with_blacklist(
           AND finalization_data.l2_tx_number_in_block = l2_to_l1_events.tx_number_in_block
         WHERE
           finalization_tx IS NULL
-          AND failed_finalization_attempts < 3
+          AND failed_finalization_attempts < 24
           AND l1_batch_number <= $6
           AND (
               ($4 AND l2_to_l1_events.to_address = $5 AND is_primary_chain = FALSE)
@@ -853,7 +853,7 @@ pub async fn withdrawals_to_finalize_with_whitelist(
           AND finalization_data.l2_tx_number_in_block = l2_to_l1_events.tx_number_in_block
         WHERE
           finalization_tx IS NULL
-          AND failed_finalization_attempts < 3
+          AND failed_finalization_attempts < 24
           AND l1_batch_number <= $6
           AND (
               ($4 AND l2_to_l1_events.to_address = $5 AND is_primary_chain = FALSE)
@@ -951,7 +951,7 @@ pub async fn withdrawals_to_finalize(
           AND finalization_data.l2_tx_number_in_block = l2_to_l1_events.tx_number_in_block
         WHERE
           finalization_tx IS NULL
-          AND failed_finalization_attempts < 3
+          AND failed_finalization_attempts < 24
           AND l1_batch_number <= $5
           AND (
               ($3 AND l2_to_l1_events.to_address = $4 AND is_primary_chain = FALSE)
@@ -961,7 +961,7 @@ pub async fn withdrawals_to_finalize(
           AND (
             last_finalization_attempt IS NULL
           OR
-            last_finalization_attempt < NOW() - INTERVAL '1 minutes'
+            last_finalization_attempt < NOW() - INTERVAL '60 minutes'
           )
           AND (
             CASE WHEN token = decode('000000000000000000000000000000000000800A', 'hex') THEN w.amount >= $2
